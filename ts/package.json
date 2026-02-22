@@ -1,18 +1,20 @@
 {
   "name": "@mkbhardwas12/mcp-bridgekit",
-  "version": "0.2.0",
+  "version": "0.6.0",
   "description": "Embeddable MCP stdio → HTTP bridge (TypeScript)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "express": "^4.21.0",
-    "redis": "^4.7.0"
+    "ioredis": "^5.4.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "typescript": "^5.7.0"
   }
 }

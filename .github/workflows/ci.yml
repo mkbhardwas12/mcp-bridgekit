@@ -9,11 +9,23 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --dev
-      - run: uv run pytest
+      - run: uv run pytest -v
+        env:
+          MCP_BRIDGEKIT_REDIS_URL: redis://localhost:6379
 
   publish:
     needs: test
