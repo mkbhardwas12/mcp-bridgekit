@@ -1,7 +1,25 @@
 # MCP BridgeKit
 
-**The missing bridge between web HTTP APIs and MCP stdio tools.**  
-Survives Vercel/Cloudflare 30 s hard timeouts. Embed in 5 lines. Open-core.
+![MCP BridgeKit](https://img.shields.io/badge/MCP-BridgeKit-00ff9f?style=for-the-badge)
+
+**Universal stdio ↔ HTTP bridge for web chatbots**  
+Survives 30 s Vercel/Cloudflare timeouts • 5-line embed • Python + TypeScript
+
+```mermaid
+graph TD
+    A[Chatbot Frontend<br>HTTP API] --> B[MCP BridgeKit<br>FastAPI/Express middleware]
+    B --> C[stdio MCP Tools<br>per-conversation pool]
+    B --> D[Redis Job Queue<br>for >25 s tools]
+    D --> E[SSE / Webhook<br>results back to frontend]
+    B --> F[Streamable HTTP MCP<br>remote fallback]
+```
+
+## Install
+```bash
+pip install git+https://github.com/mkbhardwas12/mcp-bridgekit.git
+# or npm i @mkbhardwas12/mcp-bridgekit (coming soon)
+```
+See `examples/` and `ts/` folders.
 
 ## Why it exists
 Chatbots talk HTTP. MCP tools talk stdio. BridgeKit fixes that gap.
