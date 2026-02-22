@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from .core import BridgeKit
 from .models import BridgeRequest
 from .dashboard import router as dashboard_router
+from .landing import router as landing_router
 import structlog
 
 logger = structlog.get_logger()
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     logger.info("BridgeKit shutdown complete")
 
 app = FastAPI(title="MCP BridgeKit", lifespan=lifespan)
+app.include_router(landing_router)
 app.include_router(dashboard_router)
 
 @app.post("/chat")

@@ -1,6 +1,6 @@
 [project]
 name = "mcp-bridgekit"
-version = "0.4.0"
+version = "0.5.0"
 description = "Embeddable MCP stdio → HTTP bridge with timeout survival"
 readme = "README.md"
 license = {text = "MIT"}

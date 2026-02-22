@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "builds": [{ "src": "src/mcp_bridgekit/app.py", "use": "@vercel/python" }],
+  "routes": [
+    { "src": "/(.*)", "dest": "src/mcp_bridgekit/app.py" }
+  ]
+}

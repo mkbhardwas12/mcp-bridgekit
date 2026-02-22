@@ -1,10 +1,14 @@
 # MCP BridgeKit
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/mkbhardwas12/mcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL)
+
+**One-click deploy to Vercel** — try the dashboard instantly!
+
 **The production-ready embeddable bridge for web chatbots + MCP stdio tools.**
 
 Survives Vercel/Cloudflare 30s hard timeouts • Per-conversation session pooling • Background jobs • Python + TypeScript
 
-![Version](https://img.shields.io/badge/version-0.4.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Stars](https://img.shields.io/github/stars/mkbhardwas12/mcp-bridgekit?style=social) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Stars](https://img.shields.io/github/stars/mkbhardwas12/mcp-bridgekit?style=social) ![Python](https://img.shields.io/badge/python-3.11+-blue)
 
 ## Quickstart (FastAPI)
 ```python

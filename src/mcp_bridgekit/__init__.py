@@ -3,4 +3,4 @@ from .models import BridgeRequest
 from .config import settings
 
 __all__ = ["BridgeKit", "BridgeRequest", "settings"]
-__version__ = "0.4.0"
+__version__ = "0.5.0"
