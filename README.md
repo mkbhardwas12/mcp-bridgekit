@@ -1,23 +1,12 @@
-# MCP BridgeKit v0.3
+# MCP BridgeKit
 
-**The embeddable MCP bridge that survives 30s timeouts.**
+**The production-ready embeddable bridge for web chatbots + MCP stdio tools.**
 
-```mermaid
-graph TD
-    A[Your Chatbot API] --> B[BridgeKit (5 lines)]
-    B --> C[stdio MCP Server]
-    B --> D[Redis RQ Queue]
-    D --> E[Background Worker]
-    E --> F[Result via SSE / Webhook]
-```
+Survives Vercel/Cloudflare 30s hard timeouts • Per-conversation session pooling • Background jobs • Python + TypeScript
 
-## Install
-```bash
-pip install -e .
-# or future: pip install mcp-bridgekit
-```
+![Version](https://img.shields.io/badge/version-0.3.1-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## Usage
+## Quickstart (FastAPI)
 ```python
 from fastapi import FastAPI
 from mcp_bridgekit import BridgeKit, BridgeRequest
@@ -27,17 +16,16 @@ bridge = BridgeKit()
 
 @app.post("/chat")
 async def chat(req: BridgeRequest):
-    return await bridge.call(req)
+    return await bridge.call(req)   # auto-handles short/long tools
 ```
 
-## Run worker
+## Run
 ```bash
-mcp-bridgekit-worker
+pip install -e .
+uvicorn mcp_bridgekit.app:app --reload
+# In another terminal: mcp-bridgekit-worker
 ```
 
-## Docker
-```bash
-docker-compose up
-```
+See `examples/` and `docker-compose up`.
 
-Star ⭐ if you like it!
+Made for the MCP community. Star ⭐ if it helps!

@@ -1,4 +1,6 @@
-from .core import BridgeKit, BridgeRequest
+from .core import BridgeKit
+from .models import BridgeRequest
+from .config import settings
 
-__all__ = ["BridgeKit", "BridgeRequest"]
-__version__ = "0.3.0"
+__all__ = ["BridgeKit", "BridgeRequest", "settings"]
+__version__ = "0.3.1"

@@ -5,11 +5,14 @@ services:
   bridgekit:
     build: .
     ports: ["8000:8000"]
-    command: uvicorn mcp_bridgekit.app:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - redis
     environment:
-      - REDIS_URL=redis://redis:6379
+      - MCP_BRIDGEKIT_REDIS_URL=redis://redis:6379
   worker:
     build: .
     command: mcp-bridgekit-worker
+    depends_on:
+      - redis
     environment:
-      - REDIS_URL=redis://redis:6379
+      - MCP_BRIDGEKIT_REDIS_URL=redis://redis:6379
