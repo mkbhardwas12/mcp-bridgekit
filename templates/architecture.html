@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP BridgeKit — Architecture</title>
+<style>
+  :root {
+    --bg: #09090b; --card: #18181b; --border: #27272a; --muted: #71717a;
+    --text: #fafafa; --emerald: #10b981; --blue: #3b82f6; --amber: #f59e0b;
+    --purple: #8b5cf6; --red: #ef4444; --cyan: #06b6d4; --pink: #ec4899;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+
+  /* ─── Header ─── */
+  .header { text-align: center; padding: 60px 20px 30px; position: relative; }
+  .header::before {
+    content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 600px; height: 300px; background: radial-gradient(ellipse, rgba(16,185,129,0.12) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .header h1 { font-size: 3rem; font-weight: 800; letter-spacing: -0.04em; }
+  .header h1 span { background: linear-gradient(135deg, var(--emerald), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .header p { color: var(--muted); font-size: 1.1rem; margin-top: 10px; }
+  .badge { display: inline-block; background: var(--card); border: 1px solid var(--border); padding: 4px 14px; border-radius: 20px; font-size: 0.75rem; color: var(--emerald); margin-top: 14px; letter-spacing: 0.05em; }
+
+  /* ─── Canvas wrapper ─── */
+  .arch-container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+  /* ─── Flow Section ─── */
+  .flow-section { margin-bottom: 60px; }
+  .section-label {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.15em;
+    color: var(--emerald); margin-bottom: 16px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
+
+  /* ─── Main Diagram ─── */
+  .diagram {
+    display: grid; grid-template-columns: 1fr 60px 1fr 60px 1fr;
+    align-items: start; gap: 0; position: relative;
+  }
+  .column { display: flex; flex-direction: column; gap: 16px; }
+
+  /* ─── Nodes ─── */
+  .node {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 20px; position: relative; transition: all 0.3s ease;
+  }
+  .node:hover { border-color: var(--emerald); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(16,185,129,0.08); }
+  .node-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; margin-bottom: 12px; }
+  .node-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
+  .node-sub { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+  .node-badge { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 6px; margin-top: 8px; font-weight: 600; letter-spacing: 0.04em; }
+
+  .node-emerald .node-icon { background: rgba(16,185,129,0.15); color: var(--emerald); }
+  .node-emerald .node-badge { background: rgba(16,185,129,0.12); color: var(--emerald); }
+  .node-blue .node-icon { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .node-blue .node-badge { background: rgba(59,130,246,0.12); color: var(--blue); }
+  .node-amber .node-icon { background: rgba(245,158,11,0.15); color: var(--amber); }
+  .node-amber .node-badge { background: rgba(245,158,11,0.12); color: var(--amber); }
+  .node-purple .node-icon { background: rgba(139,92,246,0.15); color: var(--purple); }
+  .node-purple .node-badge { background: rgba(139,92,246,0.12); color: var(--purple); }
+  .node-red .node-icon { background: rgba(239,68,68,0.15); color: var(--red); }
+  .node-red .node-badge { background: rgba(239,68,68,0.12); color: var(--red); }
+  .node-cyan .node-icon { background: rgba(6,182,212,0.15); color: var(--cyan); }
+  .node-cyan .node-badge { background: rgba(6,182,212,0.12); color: var(--cyan); }
+  .node-pink .node-icon { background: rgba(236,72,153,0.15); color: var(--pink); }
+  .node-pink .node-badge { background: rgba(236,72,153,0.12); color: var(--pink); }
+
+  /* ─── Connectors ─── */
+  .connector {
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 4px; padding-top: 30px;
+  }
+  .connector-line { width: 40px; height: 2px; background: linear-gradient(90deg, var(--border), var(--emerald), var(--border)); position: relative; }
+  .connector-line::after { content: '▸'; position: absolute; right: -8px; top: -9px; color: var(--emerald); font-size: 14px; }
+  .connector-label { font-size: 0.6rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap; }
+
+  /* ─── Timeout flow ─── */
+  .timeout-flow {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 0;
+    margin-top: 40px; position: relative;
+  }
+  .timeout-flow::before {
+    content: ''; position: absolute; top: 34px; left: 10%; width: 80%;
+    height: 2px; background: repeating-linear-gradient(90deg, var(--amber) 0px, var(--amber) 6px, transparent 6px, transparent 12px);
+    opacity: 0.4;
+  }
+  .step {
+    text-align: center; position: relative; z-index: 1;
+  }
+  .step-num {
+    width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; font-weight: 700; margin: 0 auto 10px;
+    border: 2px solid; transition: all 0.3s;
+  }
+  .step:hover .step-num { transform: scale(1.15); }
+  .step-title { font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; }
+  .step-desc { font-size: 0.68rem; color: var(--muted); line-height: 1.4; padding: 0 8px; }
+  .step-amber .step-num { background: rgba(245,158,11,0.15); color: var(--amber); border-color: var(--amber); }
+  .step-emerald .step-num { background: rgba(16,185,129,0.15); color: var(--emerald); border-color: var(--emerald); }
+  .step-blue .step-num { background: rgba(59,130,246,0.15); color: var(--blue); border-color: var(--blue); }
+  .step-red .step-num { background: rgba(239,68,68,0.15); color: var(--red); border-color: var(--red); }
+  .step-purple .step-num { background: rgba(139,92,246,0.15); color: var(--purple); border-color: var(--purple); }
+
+  /* ─── API Table ─── */
+  .api-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .api-row {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 20px; display: flex; align-items: center; gap: 14px;
+    transition: all 0.2s;
+  }
+  .api-row:hover { border-color: var(--blue); }
+  .method {
+    font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 5px; letter-spacing: 0.06em;
+    min-width: 50px; text-align: center;
+  }
+  .method-post { background: rgba(16,185,129,0.15); color: var(--emerald); }
+  .method-get { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .method-delete { background: rgba(239,68,68,0.15); color: var(--red); }
+  .api-path { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.82rem; font-weight: 500; }
+  .api-desc { font-size: 0.7rem; color: var(--muted); margin-left: auto; text-align: right; }
+
+  /* ─── Config Table ─── */
+  .config-grid { display: grid; grid-template-columns: 1fr; gap: 2px; border-radius: 12px; overflow: hidden; }
+  .config-row {
+    display: grid; grid-template-columns: 280px 100px 1fr;
+    background: var(--card); padding: 12px 20px; font-size: 0.8rem;
+    border-bottom: 1px solid rgba(39,39,42,0.5); transition: background 0.2s;
+  }
+  .config-row:hover { background: #1f1f23; }
+  .config-row.config-head { background: #1c1c20; font-weight: 600; color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .config-key { font-family: 'JetBrains Mono', 'Fira Code', monospace; color: var(--cyan); font-size: 0.78rem; }
+  .config-default { color: var(--amber); font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.75rem; }
+
+  /* ─── Docker ─── */
+  .docker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .docker-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 24px; text-align: center; transition: all 0.3s;
+  }
+  .docker-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+  .docker-icon { font-size: 2rem; margin-bottom: 12px; }
+  .docker-name { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+  .docker-image { font-size: 0.72rem; color: var(--muted); font-family: monospace; }
+  .docker-port { display: inline-block; margin-top: 10px; font-size: 0.7rem; padding: 3px 10px; border-radius: 6px; }
+
+  /* ─── Nav ─── */
+  .nav { display: flex; gap: 12px; justify-content: center; margin: 30px 0 10px; flex-wrap: wrap; }
+  .nav a {
+    font-size: 0.78rem; color: var(--muted); text-decoration: none; padding: 6px 16px;
+    border: 1px solid var(--border); border-radius: 8px; transition: all 0.2s;
+  }
+  .nav a:hover { color: var(--emerald); border-color: var(--emerald); }
+
+  /* ─── Animated pulse dots ─── */
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .pulse { animation: pulse 2s ease-in-out infinite; }
+  .pulse-delay { animation: pulse 2s ease-in-out infinite; animation-delay: 0.5s; }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 768px) {
+    .diagram { grid-template-columns: 1fr; gap: 12px; }
+    .connector { flex-direction: row; padding: 0; }
+    .connector-line { width: 2px; height: 30px; }
+    .connector-line::after { right: -6px; top: auto; bottom: -8px; transform: rotate(90deg); }
+    .timeout-flow { grid-template-columns: 1fr; gap: 20px; }
+    .timeout-flow::before { display: none; }
+    .docker-grid { grid-template-columns: 1fr; }
+    .config-row { grid-template-columns: 1fr; gap: 4px; }
+    .api-grid { grid-template-columns: 1fr; }
+    .api-row { flex-wrap: wrap; }
+    .api-desc { margin-left: 0; text-align: left; margin-top: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ HEADER ═══════════════════ -->
+<div class="header">
+  <h1><span>MCP BridgeKit</span> Architecture</h1>
+  <p>How stdio MCP servers become HTTP endpoints your web app can call</p>
+  <div class="badge">v0.6 · PRODUCTION READY</div>
+</div>
+
+<div class="nav">
+  <a href="/">← Home</a>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/docs">API Docs</a>
+  <a href="/health">Health</a>
+  <a href="https://github.com/mkbhardwas12/mcp-bridgekit" target="_blank">GitHub ↗</a>
+</div>
+
+<div class="arch-container">
+
+<!-- ═══════════════════ MAIN FLOW ═══════════════════ -->
+<div class="flow-section" style="margin-top: 40px;">
+  <div class="section-label">System Architecture · Request Flow</div>
+
+  <div class="diagram">
+    <!-- COLUMN 1: Clients -->
+    <div class="column">
+      <div class="node node-blue">
+        <div class="node-icon">🌐</div>
+        <div class="node-title">Web Chatbot</div>
+        <div class="node-sub">Your React / Next.js / Vue frontend sends POST /chat with user_id, tool_name, and tool_args</div>
+        <div class="node-badge">CLIENT</div>
+      </div>
+      <div class="node node-cyan">
+        <div class="node-icon">⌨️</div>
+        <div class="node-title">CLI / Script</div>
+        <div class="node-sub">curl, httpie, or any HTTP client can call the same endpoints</div>
+        <div class="node-badge">CLIENT</div>
+      </div>
+      <div class="node node-purple">
+        <div class="node-icon">🔗</div>
+        <div class="node-title">Third-party API</div>
+        <div class="node-sub">Webhook-driven integrations, Zapier, n8n, etc.</div>
+        <div class="node-badge">CLIENT</div>
+      </div>
+    </div>
+
+    <!-- CONNECTOR 1 -->
+    <div class="connector">
+      <div class="connector-label">HTTP</div>
+      <div class="connector-line"></div>
+      <div class="connector-label" style="color: var(--emerald);">SSE</div>
+    </div>
+
+    <!-- COLUMN 2: BridgeKit -->
+    <div class="column">
+      <div class="node node-emerald" style="border-color: var(--emerald); border-width: 2px;">
+        <div class="node-icon">🚀</div>
+        <div class="node-title">FastAPI Server</div>
+        <div class="node-sub">app.py — Routes, lifespan, ASGI</div>
+        <div class="node-badge">ENTRY POINT</div>
+      </div>
+      <div class="node node-emerald" style="border-color: rgba(16,185,129,0.5); border-width: 2px;">
+        <div class="node-icon">⚡</div>
+        <div class="node-title">BridgeKit Core</div>
+        <div class="node-sub">core.py — Session pooling, per-user locks, asyncio.timeout, tool discovery, job queueing</div>
+        <div class="node-badge">ENGINE · <span class="pulse">●</span> LIVE</div>
+      </div>
+      <div class="node node-pink">
+        <div class="node-icon">📊</div>
+        <div class="node-title">Dashboard</div>
+        <div class="node-sub">dashboard.py — HTMX + Tailwind live view of sessions, jobs, logs</div>
+        <div class="node-badge">UI</div>
+      </div>
+    </div>
+
+    <!-- CONNECTOR 2 -->
+    <div class="connector">
+      <div class="connector-label">stdin</div>
+      <div class="connector-line"></div>
+      <div class="connector-label">stdout</div>
+    </div>
+
+    <!-- COLUMN 3: MCP + Redis -->
+    <div class="column">
+      <div class="node node-amber">
+        <div class="node-icon">🧠</div>
+        <div class="node-title">MCP Server</div>
+        <div class="node-sub">Any stdio-based MCP tool server. Spawned as a subprocess per user session.</div>
+        <div class="node-badge">STDIO PROCESS</div>
+      </div>
+      <div class="node node-red">
+        <div class="node-icon">💾</div>
+        <div class="node-title">Redis</div>
+        <div class="node-sub">Job queue (RQ), status tracking, result storage. Keys: bridgekit:job:{id}:status/result</div>
+        <div class="node-badge">PERSISTENCE</div>
+      </div>
+      <div class="node node-purple">
+        <div class="node-icon">👷</div>
+        <div class="node-title">RQ Worker</div>
+        <div class="node-sub">worker.py — Picks timed-out jobs, spawns fresh MCP session, executes tool, stores result</div>
+        <div class="node-badge">BACKGROUND</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ TIMEOUT FLOW ═══════════════════ -->
+<div class="flow-section">
+  <div class="section-label">Timeout Handling · The Core Feature</div>
+
+  <div style="background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 36px 24px;">
+    <div class="timeout-flow">
+      <div class="step step-blue">
+        <div class="step-num">1</div>
+        <div class="step-title">Request arrives</div>
+        <div class="step-desc">POST /chat with user_id, tool_name, tool_args</div>
+      </div>
+      <div class="step step-emerald">
+        <div class="step-num">2</div>
+        <div class="step-title">Get / create session</div>
+        <div class="step-desc">Check pool → reuse or spawn new stdio MCP process</div>
+      </div>
+      <div class="step step-amber">
+        <div class="step-num">3</div>
+        <div class="step-title">Call with timeout</div>
+        <div class="step-desc">asyncio.timeout(25s) wraps session.call_tool()</div>
+      </div>
+      <div class="step step-emerald">
+        <div class="step-num pulse-delay">✓</div>
+        <div class="step-title">Fast path</div>
+        <div class="step-desc">Completes in time → SSE stream result to client</div>
+      </div>
+      <div class="step step-red">
+        <div class="step-num pulse">⏱</div>
+        <div class="step-title">Slow path</div>
+        <div class="step-desc">Timeout → Enqueue to RQ → Return job_id → Client polls GET /job/{id}</div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 16px; margin-top: 30px; justify-content: center; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem;">
+        <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--emerald);"></div>
+        <span style="color: var(--muted);">Fast response (&lt; 25s)</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem;">
+        <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--red);"></div>
+        <span style="color: var(--muted);">Background job (&gt; 25s)</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem;">
+        <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--amber);"></div>
+        <span style="color: var(--muted);">Configurable threshold</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SESSION POOL ═══════════════════ -->
+<div class="flow-section">
+  <div class="section-label">Session Pool · Concurrency Model</div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div style="background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px;">
+      <div style="font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+        <span style="color: var(--red);">🔒</span> Global Lock
+      </div>
+      <div style="font-size: 0.8rem; color: var(--muted); line-height: 1.7;">
+        A single <code style="background: #27272a; padding: 2px 6px; border-radius: 4px; color: var(--cyan); font-size: 0.75rem;">asyncio.Lock</code> protects lock-map creation.
+        Held only for nanoseconds — just to look up or create per-user locks. Prevents two concurrent first-requests for the same user_id from creating separate locks.
+      </div>
+      <div style="margin-top: 14px; padding: 12px; background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15); border-radius: 10px;">
+        <div style="font-family: monospace; font-size: 0.72rem; color: var(--muted); line-height: 1.8;">
+          <span style="color: var(--purple);">async with</span> <span style="color: var(--cyan);">self._global_lock</span>:<br>
+          &nbsp;&nbsp;<span style="color: var(--purple);">if</span> user_id <span style="color: var(--purple);">not in</span> self.locks:<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;self.locks[user_id] = <span style="color: var(--cyan);">asyncio.Lock()</span><br>
+          &nbsp;&nbsp;<span style="color: var(--purple);">return</span> self.locks[user_id]
+        </div>
+      </div>
+    </div>
+
+    <div style="background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px;">
+      <div style="font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+        <span style="color: var(--amber);">🔑</span> Per-User Locks
+      </div>
+      <div style="font-size: 0.8rem; color: var(--muted); line-height: 1.7;">
+        Each user_id gets its own lock. All session operations (create, reuse, expire, close) are serialized per user.
+        <strong style="color: var(--text);">Different users run fully concurrently.</strong>
+      </div>
+      <div style="margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 120px; padding: 10px; background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.15); border-radius: 10px; text-align: center;">
+          <div style="font-size: 0.68rem; color: var(--amber); margin-bottom: 4px;">Lock: user-abc</div>
+          <div style="font-size: 0.65rem; color: var(--muted);">→ Session 1</div>
+        </div>
+        <div style="flex: 1; min-width: 120px; padding: 10px; background: rgba(139,92,246,0.06); border: 1px solid rgba(139,92,246,0.15); border-radius: 10px; text-align: center;">
+          <div style="font-size: 0.68rem; color: var(--purple); margin-bottom: 4px;">Lock: user-xyz</div>
+          <div style="font-size: 0.65rem; color: var(--muted);">→ Session 2</div>
+        </div>
+        <div style="flex: 1; min-width: 120px; padding: 10px; background: rgba(6,182,212,0.06); border: 1px solid rgba(6,182,212,0.15); border-radius: 10px; text-align: center;">
+          <div style="font-size: 0.68rem; color: var(--cyan); margin-bottom: 4px;">Lock: user-def</div>
+          <div style="font-size: 0.65rem; color: var(--muted);">→ Session 3</div>
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-size: 0.7rem; color: var(--muted);">
+        Pool limits: <code style="background: #27272a; padding: 2px 6px; border-radius: 4px; color: var(--amber); font-size: 0.7rem;">max_sessions=100</code>
+        · TTL: <code style="background: #27272a; padding: 2px 6px; border-radius: 4px; color: var(--amber); font-size: 0.7rem;">3600s</code>
+        · Eviction: oldest first
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ API ENDPOINTS ═══════════════════ -->
+<div class="flow-section">
+  <div class="section-label">API Endpoints</div>
+
+  <div class="api-grid">
+    <div class="api-row">
+      <span class="method method-post">POST</span>
+      <span class="api-path">/chat</span>
+      <span class="api-desc">Call MCP tool → SSE stream</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-get">GET</span>
+      <span class="api-path">/job/{job_id}</span>
+      <span class="api-desc">Poll background job result</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-get">GET</span>
+      <span class="api-path">/tools/{user_id}</span>
+      <span class="api-desc">List available MCP tools</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-delete">DELETE</span>
+      <span class="api-path">/session/{user_id}</span>
+      <span class="api-desc">Close user session</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-get">GET</span>
+      <span class="api-path">/health</span>
+      <span class="api-desc">Health + session count</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-get">GET</span>
+      <span class="api-path">/dashboard</span>
+      <span class="api-desc">Live HTMX dashboard</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-get">GET</span>
+      <span class="api-path">/architecture</span>
+      <span class="api-desc">This page</span>
+    </div>
+    <div class="api-row">
+      <span class="method method-get">GET</span>
+      <span class="api-path">/docs</span>
+      <span class="api-desc">OpenAPI / Swagger UI</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ CONFIG ═══════════════════ -->
+<div class="flow-section">
+  <div class="section-label">Configuration · Environment Variables</div>
+
+  <div style="border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+    <div class="config-grid">
+      <div class="config-row config-head">
+        <span>Variable (prefix: MCP_BRIDGEKIT_)</span>
+        <span>Default</span>
+        <span>Description</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">REDIS_URL</span>
+        <span class="config-default">redis://localhost:6379</span>
+        <span style="color: var(--muted);">Redis connection for jobs + status</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">MAX_SESSIONS</span>
+        <span class="config-default">100</span>
+        <span style="color: var(--muted);">Maximum concurrent MCP sessions in pool</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">SESSION_TTL_SECONDS</span>
+        <span class="config-default">3600</span>
+        <span style="color: var(--muted);">Session expiry — 1 hour default</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">TIMEOUT_THRESHOLD_SECONDS</span>
+        <span class="config-default">25.0</span>
+        <span style="color: var(--muted);">Seconds before a tool call is queued as background job</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">JOB_RESULT_TTL_SECONDS</span>
+        <span class="config-default">600</span>
+        <span style="color: var(--muted);">How long job results stay in Redis (10 min)</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">DEFAULT_MCP_COMMAND</span>
+        <span class="config-default">python</span>
+        <span style="color: var(--muted);">Default command to run MCP server</span>
+      </div>
+      <div class="config-row">
+        <span class="config-key">DEFAULT_MCP_ARGS</span>
+        <span class="config-default">["examples/mcp_server.py"]</span>
+        <span style="color: var(--muted);">Default args for MCP server command</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ DOCKER ═══════════════════ -->
+<div class="flow-section">
+  <div class="section-label">Docker Deployment · 3 Services</div>
+
+  <div class="docker-grid">
+    <div class="docker-card" style="border-color: rgba(239,68,68,0.3);">
+      <div class="docker-icon">🗄️</div>
+      <div class="docker-name" style="color: var(--red);">Redis</div>
+      <div class="docker-image">redis:7-alpine</div>
+      <div class="docker-port" style="background: rgba(239,68,68,0.1); color: var(--red);">:6379</div>
+      <div style="margin-top: 10px; font-size: 0.72rem; color: var(--muted);">Job queue, status store, result cache</div>
+    </div>
+    <div class="docker-card" style="border-color: rgba(59,130,246,0.3);">
+      <div class="docker-icon">🚀</div>
+      <div class="docker-name" style="color: var(--blue);">BridgeKit Server</div>
+      <div class="docker-image">python:3.12-slim</div>
+      <div class="docker-port" style="background: rgba(59,130,246,0.1); color: var(--blue);">:8000</div>
+      <div style="margin-top: 10px; font-size: 0.72rem; color: var(--muted);">FastAPI + uvicorn, all HTTP endpoints</div>
+    </div>
+    <div class="docker-card" style="border-color: rgba(139,92,246,0.3);">
+      <div class="docker-icon">👷</div>
+      <div class="docker-name" style="color: var(--purple);">RQ Worker</div>
+      <div class="docker-image">python:3.12-slim</div>
+      <div class="docker-port" style="background: rgba(139,92,246,0.1); color: var(--purple);">internal</div>
+      <div style="margin-top: 10px; font-size: 0.72rem; color: var(--muted);">Executes timed-out MCP tool calls</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 20px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px;">
+    <div style="font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.82rem; color: var(--muted);">
+      <span style="color: var(--emerald);">$</span> docker-compose up
+      <span style="color: #3f3f46; margin-left: 16px;"># starts all 3 services</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ FILE STRUCTURE ═══════════════════ -->
+<div class="flow-section">
+  <div class="section-label">Project Structure</div>
+
+  <div style="background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px 28px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.78rem; line-height: 1.9;">
+    <span style="color: var(--emerald);">mcp-bridgekit/</span><br>
+    ├── <span style="color: var(--cyan);">src/mcp_bridgekit/</span><br>
+    │&nbsp;&nbsp; ├── __init__.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # exports: BridgeKit, BridgeRequest, settings</span><br>
+    │&nbsp;&nbsp; ├── <span style="color: var(--emerald);">app.py</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # FastAPI app — routes + lifespan</span><br>
+    │&nbsp;&nbsp; ├── <span style="color: var(--emerald);">core.py</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # BridgeKit — the engine ⚡</span><br>
+    │&nbsp;&nbsp; ├── <span style="color: var(--amber);">config.py</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # pydantic-settings config</span><br>
+    │&nbsp;&nbsp; ├── <span style="color: var(--blue);">models.py</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # Pydantic request models</span><br>
+    │&nbsp;&nbsp; ├── <span style="color: var(--purple);">worker.py</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # RQ background worker</span><br>
+    │&nbsp;&nbsp; ├── <span style="color: var(--pink);">dashboard.py</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # /dashboard route</span><br>
+    │&nbsp;&nbsp; ├── landing.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # / landing page</span><br>
+    │&nbsp;&nbsp; └── stripe.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # Stripe skeleton</span><br>
+    ├── <span style="color: var(--cyan);">ts/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # TypeScript (Express) version</span><br>
+    ├── <span style="color: var(--cyan);">templates/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # HTMX dashboard template</span><br>
+    ├── <span style="color: var(--cyan);">examples/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # fastapi_app.py, mcp_server.py</span><br>
+    ├── <span style="color: var(--cyan);">tests/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #3f3f46;">  # test_core.py (mocked, no Redis needed)</span><br>
+    ├── Dockerfile<br>
+    ├── docker-compose.yml<br>
+    ├── pyproject.toml<br>
+    └── ARCHITECTURE.md
+  </div>
+</div>
+
+<!-- ═══════════════════ FOOTER ═══════════════════ -->
+<div style="text-align: center; padding: 40px 20px 60px; color: var(--muted); font-size: 0.75rem;">
+  <div style="margin-bottom: 8px;">
+    <a href="https://github.com/mkbhardwas12/mcp-bridgekit" target="_blank" style="color: var(--emerald); text-decoration: none;">github.com/mkbhardwas12/mcp-bridgekit</a>
+  </div>
+  MCP BridgeKit v0.6 · MIT License · Made for the MCP community
+</div>
+
+</div>
+</body>
+</html>

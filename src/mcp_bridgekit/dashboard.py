@@ -14,6 +14,11 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
+@router.get("/architecture", response_class=HTMLResponse)
+async def architecture(request: Request):
+    return templates.TemplateResponse("architecture.html", {"request": request})
+
+
 @router.get("/dashboard/data")
 async def dashboard_data(request: Request):
     bridge = request.app.state.bridge

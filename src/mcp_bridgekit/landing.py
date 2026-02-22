@@ -18,6 +18,7 @@ async def landing():
             <p class="text-lg text-zinc-400 mb-10">Per-user session pooling • Real timeout handling • Background job queue • Live dashboard</p>
             <div class="flex gap-4 justify-center">
                 <a href="/dashboard" class="bg-emerald-500 hover:bg-emerald-600 px-10 py-4 rounded-xl text-xl font-semibold">Open Dashboard →</a>
+                <a href="/architecture" class="bg-zinc-800 hover:bg-zinc-700 px-10 py-4 rounded-xl text-xl font-semibold border border-zinc-700">Architecture →</a>
                 <a href="/docs" class="bg-zinc-800 hover:bg-zinc-700 px-10 py-4 rounded-xl text-xl font-semibold border border-zinc-700">API Docs →</a>
             </div>
             <p class="mt-10 text-zinc-600 text-sm">v0.6 • Deploy with Docker or run locally</p>
