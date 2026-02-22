@@ -1,6 +1,6 @@
 [project]
 name = "mcp-bridgekit"
-version = "0.3.1"
+version = "0.4.0"
 description = "Embeddable MCP stdio → HTTP bridge with timeout survival"
 readme = "README.md"
 license = {text = "MIT"}
@@ -14,6 +14,7 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "structlog>=24.4.0",
     "httpx>=0.28.0",
+    "jinja2>=3.1.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP BridgeKit Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@2.0.0/dist/htmx.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; }
+        .live-dot { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    </style>
+</head>
+<body class="bg-zinc-950 text-white min-h-screen">
+    <div class="max-w-7xl mx-auto p-8">
+        <div class="flex items-center justify-between mb-10">
+            <h1 class="text-4xl font-bold text-emerald-400">MCP BridgeKit Dashboard</h1>
+            <div class="text-sm text-zinc-500">v0.4 • Live • <span id="last-update" class="text-emerald-400"></span></div>
+        </div>
+
+        <div id="dashboard-content">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Active Sessions -->
+                <div class="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-3 h-3 bg-emerald-400 rounded-full live-dot"></div>
+                        <h2 class="text-xl font-semibold">Active Sessions</h2>
+                    </div>
+                    <div id="sessions" class="text-5xl font-mono font-bold text-emerald-400">0</div>
+                    <p class="text-zinc-500 text-sm mt-2">Per-conversation MCP processes</p>
+                </div>
+
+                <!-- Queued Jobs -->
+                <div class="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
+                    <h2 class="text-xl font-semibold mb-4">Queued Jobs</h2>
+                    <div id="jobs" class="text-5xl font-mono font-bold text-amber-400">0</div>
+                    <p class="text-zinc-500 text-sm mt-2">Long-running tools (&gt;25s)</p>
+                </div>
+
+                <!-- Recent Logs -->
+                <div class="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
+                    <h2 class="text-xl font-semibold mb-4">Recent Logs</h2>
+                    <div id="logs" class="text-xs font-mono text-zinc-400 h-48 overflow-auto space-y-1">
+                        <p>Waiting for data...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tools -->
+            <div class="mt-8 bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
+                <h2 class="text-xl font-semibold mb-4">Available Tools</h2>
+                <div id="tools" class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                    <p class="text-zinc-500">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto-refresh via HTMX -->
+        <div hx-get="/dashboard/data" hx-trigger="every 5s" hx-swap="none"
+             hx-on::after-request="updateDashboard(event)"></div>
+    </div>
+
+    <script>
+        function updateTime() {
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // Fetch initial data
+        fetch('/dashboard/data')
+            .then(r => r.json())
+            .then(data => renderData(data))
+            .catch(() => {});
+
+        function updateDashboard(event) {
+            try {
+                const data = JSON.parse(event.detail.xhr.responseText);
+                renderData(data);
+            } catch(e) {}
+        }
+
+        function renderData(data) {
+            document.getElementById('sessions').textContent = data.sessions || 0;
+            document.getElementById('jobs').textContent = data.jobs || 0;
+
+            const logsEl = document.getElementById('logs');
+            if (data.logs && data.logs.length) {
+                logsEl.innerHTML = data.logs.map(l => `<p>${l}</p>`).join('');
+            }
+
+            const toolsEl = document.getElementById('tools');
+            if (data.tools && data.tools.length) {
+                toolsEl.innerHTML = data.tools.map(t =>
+                    `<span class="bg-zinc-800 px-3 py-2 rounded-lg border border-zinc-700 text-emerald-300">${t}</span>`
+                ).join('');
+            }
+        }
+    </script>
+</body>
+</html>
