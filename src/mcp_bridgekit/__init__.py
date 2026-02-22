@@ -1,4 +1,4 @@
-from .core import BridgeKit
+from .core import BridgeKit, BridgeRequest
 
-__all__ = ["BridgeKit"]
-__version__ = "0.1.0"
+__all__ = ["BridgeKit", "BridgeRequest"]
+__version__ = "0.3.0"

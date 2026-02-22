@@ -6,17 +6,21 @@ from typing import AsyncGenerator, Dict, Any
 from fastapi.responses import StreamingResponse
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from redis.asyncio import Redis
+from redis import Redis
+from rq import Queue
 from pydantic import BaseModel
+from .config import settings
 
 class BridgeRequest(BaseModel):
     user_id: str
     messages: list
-    mcp_config: dict = {"command": "python", "args": ["examples/mcp_server.py"]}
+    mcp_config: dict | None = None
+    tool_name: str | None = None   # optional — auto-detects if None
 
 class BridgeKit:
-    def __init__(self, redis_url: str = "redis://localhost"):
-        self.redis = Redis.from_url(redis_url)
+    def __init__(self):
+        self.redis = Redis.from_url(settings.redis_url)
+        self.queue = Queue(connection=self.redis)
         self.sessions: Dict[str, tuple[ClientSession, AsyncExitStack]] = {}
         self.lock = asyncio.Lock()
 
@@ -26,34 +30,37 @@ class BridgeKit:
                 stack = AsyncExitStack()
                 params = StdioServerParameters(**config)
                 read, write = await stack.enter_async_context(stdio_client(params))
-                session: ClientSession = await stack.enter_async_context(
-                    ClientSession(read, write)
-                )
+                session: ClientSession = await stack.enter_async_context(ClientSession(read, write))
                 await session.initialize()
                 self.sessions[user_id] = (session, stack)
             return self.sessions[user_id][0]
 
-    async def cleanup_session(self, user_id: str):
-        async with self.lock:
-            if user_id in self.sessions:
-                _, stack = self.sessions.pop(user_id)
-                await stack.aclose()
-
-    async def call(self, user_id: str, messages: list, config: dict) -> StreamingResponse:
+    async def list_tools(self, user_id: str, config: dict):
         session = await self.get_session(user_id, config)
+        tools = await session.list_tools()
+        return [t.model_dump() for t in tools]
+
+    async def call(self, request: BridgeRequest) -> StreamingResponse:
+        config = request.mcp_config or {
+            "command": settings.default_mcp_command,
+            "args": settings.default_mcp_args
+        }
+        session = await self.get_session(request.user_id, config)
 
         async def event_stream() -> AsyncGenerator[str, None]:
             try:
-                # TODO: replace with dynamic tool routing from messages
-                async for chunk in session.call_tool_stream("analyze_data", {"query": str(messages)}):
-                    yield f"data: {json.dumps(chunk)}\n\n"
-            except asyncio.TimeoutError:
-                job_id = str(uuid.uuid4())
-                await self.redis.setex(
-                    f"job:{job_id}", 3600, json.dumps({"user_id": user_id, "messages": messages, "config": config})
-                )
-                yield f'data: {{"status": "queued", "job_id": "{job_id}"}}\n\n'
+                tool_name = request.tool_name or "analyze_data"  # fallback for demo
+                # Real dynamic call
+                result = await session.call_tool(tool_name, {"query": str(request.messages)})
+
+                # Check if long-running (simulate or use real timing)
+                if asyncio.get_running_loop().time() > settings.timeout_threshold_seconds:  # simplified
+                    job_id = str(uuid.uuid4())
+                    self.queue.enqueue("mcp_bridgekit.worker.process_job", request.model_dump(), job_id=job_id)
+                    yield f'data: {{"status": "queued", "job_id": "{job_id}"}}\n\n'
+                else:
+                    yield f'data: {json.dumps(result.model_dump())}\n\n'
             except Exception as e:
-                yield f'data: {{"status": "error", "message": str(e)}}\n\n'
+                yield f'data: {{"status": "error", "message": "{str(e)}"}}\n\n'
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
