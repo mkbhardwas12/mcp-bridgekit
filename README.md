@@ -27,6 +27,8 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 - [Embedding in Your App](#embedding-in-your-app)
 - [Project Structure](#project-structure)
 - [TypeScript Version](#typescript-version)
+- [End-to-End Testing Guide](#end-to-end-testing-guide)
+- [Horizontal Scaling](#horizontal-scaling)
 - [Full Architecture Docs](#-full-architecture-docs)
 - [License](#license)
 
@@ -247,19 +249,28 @@ sequenceDiagram
 # Clone & install
 git clone https://github.com/mkbhardwas12/mcp-bridgekit.git
 cd mcp-bridgekit
-pip install -e ".[dev]"
+
+# Copy environment config
+cp .env.example .env   # edit if needed (all vars have sensible defaults)
+
+# Install (pick one)
+uv sync --dev          # recommended — fastest
+pip install -e ".[dev]" # alternative
 
 # Start Redis (required for job queue)
 docker run -d -p 6379:6379 redis:7-alpine
 
-# Run the server
+# Terminal 1 — Run the server
 uvicorn mcp_bridgekit.app:app --reload
 
-# In another terminal — start the background worker
+# Terminal 2 — Start the background worker
 mcp-bridgekit-worker
 ```
 
-Open http://localhost:8000 for the landing page, http://localhost:8000/dashboard for the live dashboard, http://localhost:8000/docs for API docs.
+Open:
+- http://localhost:8000 — Landing page
+- http://localhost:8000/dashboard — Live dashboard
+- http://localhost:8000/docs — Interactive API docs
 
 ## Docker (Recommended)
 
@@ -322,7 +333,7 @@ List available tools from the MCP server.
 Close a user's MCP session.
 
 ### `GET /health`
-Health check with active session count.
+Health check with stats: active sessions, total requests, errors, queued jobs, known tools.
 
 ## Concurrency Model
 
@@ -410,6 +421,102 @@ A TypeScript implementation is available in `ts/`. Same architecture — session
 ```bash
 cd ts && npm install && npm run build && npm start
 ```
+
+## End-to-End Testing Guide
+
+Verify everything works with these steps:
+
+### 1. Start Services
+
+```bash
+# Option A — Docker (easiest)
+docker-compose up --build
+
+# Option B — Manual (3 terminals)
+# T1: docker run -d -p 6379:6379 redis:7-alpine
+# T2: mcp-bridgekit-worker
+# T3: uvicorn mcp_bridgekit.app:app --reload --port 8000
+```
+
+### 2. Check Dashboard
+
+Open http://localhost:8000/dashboard — should show 0 sessions, 0 jobs.
+
+### 3. Call a Tool (instant response)
+
+```bash
+curl -N -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test-001",
+    "messages": [{"role": "user", "content": "hello"}],
+    "tool_name": "analyze_data",
+    "tool_args": {"query": "test query"}
+  }'
+```
+
+→ SSE stream with result appears immediately. Dashboard shows 1 active session.
+
+### 4. Test Timeout Survival (background job)
+
+Edit `examples/mcp_server.py` — change `asyncio.sleep(2)` to `asyncio.sleep(35)`, then re-run the curl above.
+
+→ Immediate response: `{"status": "queued", "job_id": "..."}`  
+→ Dashboard updates live (Queued Jobs increases)  
+→ Worker terminal shows processing
+
+### 5. Poll Job Result
+
+```bash
+curl http://localhost:8000/job/{job_id_from_step_4}
+```
+
+→ Returns `{"status": "completed", "result": {...}}` once the worker finishes.
+
+### 6. List Available Tools
+
+```bash
+curl "http://localhost:8000/tools/test-001"
+```
+
+### 7. Cleanup Session
+
+```bash
+curl -X DELETE http://localhost:8000/session/test-001
+```
+
+### 8. Health Check
+
+```bash
+curl http://localhost:8000/health
+```
+
+→ Returns active sessions, request counts, error counts, queue depth.
+
+**Expected result**: Tools respond instantly → slow tools get queued → dashboard shows live updates → sessions scale cleanly.
+
+---
+
+## Horizontal Scaling
+
+BridgeKit is designed to scale horizontally:
+
+| Component | How to Scale | Notes |
+|-----------|-------------|-------|
+| **Web server** | `gunicorn --workers N` | Dockerfile defaults to 4 workers. Each worker has its own event loop. |
+| **RQ workers** | Run multiple `mcp-bridgekit-worker` processes | docker-compose defaults to 3 replicas. All point to the same Redis. |
+| **Redis** | Use managed Redis (Upstash, ElastiCache, Redis Cloud) | Single Redis handles thousands of connections. |
+| **Multi-machine** | Run workers on different machines pointing to same Redis | `MCP_BRIDGEKIT_REDIS_URL=redis://your-redis-host:6379` |
+
+```bash
+# Scale workers to 5 replicas
+docker-compose up --scale worker=5
+
+# Or run standalone workers on any machine
+MCP_BRIDGEKIT_REDIS_URL=redis://shared-redis:6379 mcp-bridgekit-worker
+```
+
+---
 
 ## 📐 Full Architecture Docs
 
