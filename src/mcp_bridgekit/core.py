@@ -43,6 +43,9 @@ class BridgeKit:
         self.known_tools: Dict[str, list[dict]] = {}
         self._request_count = 0
         self._error_count = 0
+        # Tool list cache: avoids expensive list_tools() calls on every request
+        self._tool_cache: Dict[str, tuple[list[dict], float]] = {}
+        self._tool_cache_ttl = 300  # 5 minutes
 
     # ── Logging ──────────────────────────────────────────────
 
@@ -134,6 +137,7 @@ class BridgeKit:
                 _, stack, _ = self.sessions.pop(user_id)
                 await self._close_stack(stack)
                 self.known_tools.pop(user_id, None)
+                self._tool_cache.pop(user_id, None)
                 self._log(f"Session cleaned for {user_id}")
 
     async def cleanup_all(self):
@@ -146,10 +150,24 @@ class BridgeKit:
     # ── Tool listing ─────────────────────────────────────────
 
     async def list_tools(self, user_id: str, config: dict) -> list[dict]:
+        now = time.time()
+
+        # Check cache first
+        if user_id in self._tool_cache:
+            tools, expiry = self._tool_cache[user_id]
+            if now < expiry:
+                self._log(f"Tool list cache hit for {user_id}")
+                return tools
+
+        # Cache miss — fetch from MCP server
         session = await self.get_session(user_id, config)
         result = await session.list_tools()
         tools = [t.model_dump() for t in result.tools]
+
+        # Cache it
+        self._tool_cache[user_id] = (tools, now + self._tool_cache_ttl)
         self.known_tools[user_id] = tools
+        self._log(f"Tool list cached for {user_id} ({len(tools)} tools)")
         return tools
 
     def get_all_tool_names(self) -> list[str]:
@@ -257,4 +275,5 @@ class BridgeKit:
             "total_errors": self._error_count,
             "queued_jobs": self.queue.count,
             "known_tools": len(self.get_all_tool_names()),
+            "cached_tool_lists": len(self._tool_cache),
         }

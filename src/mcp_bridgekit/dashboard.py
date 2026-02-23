@@ -22,10 +22,9 @@ async def architecture(request: Request):
 @router.get("/dashboard/data")
 async def dashboard_data(request: Request):
     bridge = request.app.state.bridge
+    stats = bridge.get_stats()
     return {
-        "sessions": len(bridge.sessions),
-        "max_sessions": settings.max_sessions,
-        "jobs": bridge.queue.count if hasattr(bridge, "queue") else 0,
+        **stats,
         "logs": list(bridge.recent_logs),
         "tools": bridge.get_all_tool_names(),
     }
