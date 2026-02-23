@@ -24,6 +24,7 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 - [API Reference](#api-reference)
 - [Concurrency Model](#concurrency-model)
 - [Configuration](#configuration)
+- [Connecting to Any MCP Server](#connecting-to-any-mcp-server)
 - [Embedding in Your App](#embedding-in-your-app)
 - [Project Structure](#project-structure)
 - [TypeScript Version](#typescript-version)
@@ -373,6 +374,57 @@ Set via environment variables or `.env` file (prefix: `MCP_BRIDGEKIT_`):
 | `JOB_RESULT_TTL_SECONDS` | `600` | How long job results stay in Redis |
 | `DEFAULT_MCP_COMMAND` | `python` | Default MCP server command |
 | `DEFAULT_MCP_ARGS` | `["examples/mcp_server.py"]` | Default MCP server args |
+
+## Connecting to Any MCP Server
+
+BridgeKit works with **any MCP server** — you just pass different `mcp_config` values.
+The `mcp_config` tells BridgeKit which command to spawn:
+
+### Supported MCP Servers
+
+| MCP Server | `command` | `args` | Example Tools |
+|---|---|---|---|
+| **AWS MCP** | `npx` | `["-y", "@aws/aws-mcp"]` | `describe_instances`, `list_s3_buckets` |
+| **AWS CDK** | `npx` | `["-y", "@aws/aws-cdk-mcp-server"]` | `GenerateCDK`, `ExplainCDK` |
+| **AWS Docs** | `npx` | `["-y", "@aws/aws-documentation-mcp-server"]` | `search_documentation` |
+| **GitHub** | `npx` | `["-y", "@modelcontextprotocol/server-github"]` | `search_repositories`, `create_issue` |
+| **Filesystem** | `npx` | `["-y", "@modelcontextprotocol/server-filesystem", "/data"]` | `read_file`, `write_file` |
+| **PostgreSQL** | `npx` | `["-y", "@modelcontextprotocol/server-postgres"]` | `query` |
+| **Custom Python** | `python` | `["/path/to/server.py"]` | Whatever you define |
+
+### Quick Example: AWS MCP from Your API
+
+```python
+import httpx
+
+BRIDGEKIT_URL = "http://your-bridgekit-host:8000"
+
+# Step 1: Discover available tools
+resp = await httpx.AsyncClient().get(
+    f"{BRIDGEKIT_URL}/tools/discovery",
+    params={"command": "npx", "args": "-y,@aws/aws-mcp"},
+)
+print(resp.json())  # Shows all tools with schemas
+
+# Step 2: Call a tool
+async with httpx.AsyncClient(timeout=60.0) as client:
+    resp = await client.post(f"{BRIDGEKIT_URL}/chat", json={
+        "user_id": "user-123",
+        "messages": [{"role": "user", "content": "list instances"}],
+        "mcp_config": {
+            "command": "npx",
+            "args": ["-y", "@aws/aws-mcp"],
+        },
+        "tool_name": "describe_instances",
+        "tool_args": {"region": "us-east-1"},
+    })
+```
+
+Prerequisites: Install the MCP server package on the BridgeKit host (`npm install -g @aws/aws-mcp`) and configure AWS credentials.
+
+> **Full guide**: See [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) for deployment on AWS, credential setup, polling for long-running jobs, and complete working examples.
+
+> **Code examples**: See [examples/aws_integration.py](examples/aws_integration.py) for 8 ready-to-use endpoint patterns.
 
 ## Embedding in Your App
 
