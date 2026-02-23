@@ -24,5 +24,11 @@ class Settings(BaseSettings):
     # Retry: transient tool-call failures will be retried this many times
     max_tool_retries: int = 2
 
+    # ── v0.9.0 push notifications ─────────────────────────────
+    # Webhook: POST job completion payload to this URL (leave empty to disable)
+    webhook_url: str | None = None
+    # SSE: publish completion events to Redis Pub/Sub for /mcp/events/{job_id}
+    enable_sse: bool = True
+
 settings = Settings()
 logger.info("MCP BridgeKit config loaded", **settings.model_dump())

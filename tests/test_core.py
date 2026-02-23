@@ -317,3 +317,95 @@ def test_metrics_endpoint(mock_queue, mock_async_redis, mock_sync_redis):
     assert "# TYPE" in body
     assert "# HELP" in body
 
+
+# ── v0.9.0 Webhook + SSE push notification tests ─────────────────────────────
+
+def test_push_notification_sends_webhook():
+    """_push_notification calls httpx.post when webhook_url is configured."""
+    from unittest.mock import patch as _patch, MagicMock as _MM
+    from redis import Redis as _Redis
+
+    with _patch("mcp_bridgekit.worker.settings") as mock_cfg, \
+         _patch("mcp_bridgekit.worker.httpx") as mock_httpx:
+        mock_cfg.webhook_url = "https://example.com/webhook"
+        mock_cfg.enable_sse = False
+
+        from mcp_bridgekit.worker import _push_notification
+
+        fake_redis = _MM(spec=_Redis)
+        payload = {"job_id": "j1", "status": "completed", "result": {}}
+        _push_notification(fake_redis, "j1", payload)
+
+        mock_httpx.post.assert_called_once()
+        call_kwargs = mock_httpx.post.call_args
+        assert "https://example.com/webhook" in call_kwargs[0]
+
+
+def test_push_notification_no_webhook_when_unset():
+    """_push_notification skips httpx.post when webhook_url is None."""
+    from unittest.mock import patch as _patch, MagicMock as _MM
+    from redis import Redis as _Redis
+
+    with _patch("mcp_bridgekit.worker.settings") as mock_cfg, \
+         _patch("mcp_bridgekit.worker.httpx") as mock_httpx:
+        mock_cfg.webhook_url = None
+        mock_cfg.enable_sse = False
+
+        from mcp_bridgekit.worker import _push_notification
+
+        fake_redis = _MM(spec=_Redis)
+        _push_notification(fake_redis, "j1", {"job_id": "j1"})
+
+        mock_httpx.post.assert_not_called()
+
+
+def test_push_notification_publishes_sse():
+    """_push_notification calls redis.publish when enable_sse is True."""
+    from unittest.mock import patch as _patch, MagicMock as _MM
+    from redis import Redis as _Redis
+
+    with _patch("mcp_bridgekit.worker.settings") as mock_cfg:
+        mock_cfg.webhook_url = None
+        mock_cfg.enable_sse = True
+
+        from mcp_bridgekit.worker import _push_notification
+
+        fake_redis = _MM(spec=_Redis)
+        _push_notification(fake_redis, "j42", {"job_id": "j42", "status": "completed"})
+
+        fake_redis.publish.assert_called_once()
+        channel_arg = fake_redis.publish.call_args[0][0]
+        assert channel_arg == "bridgekit:events:j42"
+
+
+def test_push_notification_webhook_failure_is_logged():
+    """A webhook HTTP error is caught and logged — does not raise."""
+    from unittest.mock import patch as _patch, MagicMock as _MM
+    from redis import Redis as _Redis
+
+    with _patch("mcp_bridgekit.worker.settings") as mock_cfg, \
+         _patch("mcp_bridgekit.worker.httpx") as mock_httpx:
+        mock_cfg.webhook_url = "https://bad-host.invalid/hook"
+        mock_cfg.enable_sse = False
+        mock_httpx.post.side_effect = Exception("connection refused")
+
+        from mcp_bridgekit.worker import _push_notification
+
+        fake_redis = _MM(spec=_Redis)
+        # Must not raise
+        _push_notification(fake_redis, "j99", {"job_id": "j99"})
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_sse_events_route_registered(mock_queue, mock_async_redis, mock_sync_redis):
+    """GET /mcp/events/{job_id} route exists in the app."""
+    from fastapi.testclient import TestClient
+    from mcp_bridgekit.app import app
+
+    mock_redis_instance = AsyncMock()
+    mock_async_redis.from_url.return_value = mock_redis_instance
+
+    routes = [r.path for r in app.routes]
+    assert "/mcp/events/{job_id}" in routes

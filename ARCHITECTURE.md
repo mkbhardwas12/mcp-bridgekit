@@ -1,6 +1,6 @@
 # Architecture
 
-> MCP BridgeKit v0.6 — Embeddable MCP stdio → HTTP bridge
+> MCP BridgeKit v0.8.0 — Embeddable MCP stdio → HTTP bridge
 
 ## High-Level Overview
 
@@ -14,9 +14,11 @@ graph TB
 
     subgraph BridgeKit Server
         FP[FastAPI App<br/>app.py]
+        AUTH[Auth Middleware<br/>auth.py]
         CORE[BridgeKit Core<br/>core.py]
         DASH[Dashboard<br/>dashboard.py]
         LAND[Landing Page<br/>landing.py]
+        METRICS[/metrics endpoint]
     end
 
     subgraph Session Pool
@@ -41,8 +43,11 @@ graph TB
     API -->|POST /chat| FP
     WEB -->|GET /dashboard| DASH
     WEB -->|GET /| LAND
+    WEB -->|GET /metrics| METRICS
 
-    FP --> CORE
+    FP --> AUTH
+    AUTH -->|verified| CORE
+    AUTH -->|401/429| FP
     CORE --> S1
     CORE --> S2
     CORE --> SN
@@ -60,6 +65,7 @@ graph TB
     style CORE fill:#10b981,color:#fff
     style REDIS fill:#f59e0b,color:#fff
     style FP fill:#3b82f6,color:#fff
+    style AUTH fill:#ef4444,color:#fff
 ```
 
 ## Request Flow
@@ -75,7 +81,16 @@ sequenceDiagram
     participant Worker as RQ Worker
 
     Client->>FastAPI: POST /chat {user_id, tool_name, tool_args}
+    FastAPI->>FastAPI: verify_api_key (X-API-Key header)
+    alt Auth fails
+        FastAPI-->>Client: HTTP 401 UNAUTHORIZED / MISSING_API_KEY
+    end
     FastAPI->>Core: bridge.call(req)
+    Core->>Core: _check_rate_limit(user_id)
+    alt Rate limit exceeded
+        Core-->>FastAPI: JSONResponse 429 RATE_LIMITED
+        FastAPI-->>Client: HTTP 429
+    end
     Core->>Core: _get_lock(user_id)
 
     alt Session exists & not expired
@@ -90,12 +105,16 @@ sequenceDiagram
     end
 
     Core->>Core: asyncio.timeout(25s)
-    Core->>MCP: session.call_tool(name, args)
+    Core->>MCP: session.call_tool(name, args) [attempt 0..max_retries]
 
     alt Completes within timeout
         MCP-->>Core: Tool result
         Core-->>FastAPI: SSE: data: {result}
         FastAPI-->>Client: SSE stream
+    else Transient failure (non-timeout)
+        Core->>Core: sleep(2^attempt), evict session
+        Core->>MCP: Reconnect & retry
+        Note over Core,MCP: Up to max_tool_retries retries
     else Timeout exceeded
         Core->>Redis: SET job:{id}:status = queued
         Core->>Redis: ENQUEUE process_job
@@ -126,9 +145,11 @@ mcp-bridgekit/
 ├── src/mcp_bridgekit/          # Python package
 │   ├── __init__.py             # Exports: BridgeKit, BridgeRequest, settings
 │   ├── app.py                  # FastAPI app — routes, lifespan
+│   ├── auth.py                 # FastAPI dependency — X-API-Key verification
 │   ├── core.py                 # BridgeKit class — session pool, timeouts, jobs
 │   ├── config.py               # pydantic-settings — env-based config
-│   ├── models.py               # Pydantic request/response models
+│   ├── models.py               # Pydantic request/response models + ErrorCode enum
+│   ├── events.py               # SSE push + Redis Pub/Sub broadcaster
 │   ├── worker.py               # RQ background worker — executes timed-out jobs
 │   ├── dashboard.py            # /dashboard route — HTMX live view
 │   ├── landing.py              # / route — landing page
@@ -164,6 +185,8 @@ The heart of the system. Manages:
 | **Pool limits** | Evicts oldest session when `max_sessions` exceeded |
 | **Session TTL** | Checks `time.time() - created_at` against `session_ttl_seconds` |
 | **Timeout handling** | `asyncio.timeout(threshold)` wraps `session.call_tool()` |
+| **Rate limiting** | `_check_rate_limit(user_id)` — Redis INCR on `bridgekit:ratelimit:{user_id}:{bucket}`, 90s TTL |
+| **Retry + backoff** | Retry loop up to `max_tool_retries+1` attempts; `2^attempt` sleep; session evicted before retry |
 | **Background jobs** | On timeout: stores status in Redis, enqueues via RQ |
 | **Tool discovery** | Calls `session.list_tools()` on new sessions, caches per user |
 | **Logging** | Structured logging + in-memory `deque(maxlen=100)` for dashboard |
@@ -172,15 +195,34 @@ The heart of the system. Manages:
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/chat` | POST | Call MCP tool → SSE stream (auto-queues on timeout) |
-| `/job/{job_id}` | GET | Poll background job status/result |
-| `/tools/{user_id}` | GET | List available MCP tools |
-| `/session/{user_id}` | DELETE | Close a user's session |
-| `/health` | GET | Health + active session count |
-| `/dashboard` | GET | Live HTMX dashboard |
-| `/dashboard/data` | GET | JSON data feed for dashboard |
-| `/` | GET | Landing page |
-| `/docs` | GET | Auto-generated OpenAPI docs |
+| `/chat` | POST | Call MCP tool → SSE stream (auto-queues on timeout) — **auth required** |
+| `/job/{job_id}` | GET | Poll background job status/result — **auth required** |
+| `/tools/{user_id}` | GET | List available MCP tools — **auth required** |
+| `/session/{user_id}` | DELETE | Close a user's session — **auth required** |
+| `/health` | GET | Health + active session count — public |
+| `/metrics` | GET | Prometheus text exposition (7 gauges/counters) — public |
+| `/dashboard` | GET | Live HTMX dashboard — public |
+| `/dashboard/data` | GET | JSON data feed for dashboard — public |
+| `/` | GET | Landing page — public |
+| `/docs` | GET | Auto-generated OpenAPI docs — public |
+
+### `auth.py` — API Key Verification
+
+FastAPI dependency injected into all protected routes via `Depends(verify_api_key)`.
+
+```mermaid
+flowchart LR
+    A[Incoming Request] --> B{settings.api_key set?}
+    B -->|No — disabled| C[Pass through]
+    B -->|Yes — enabled| D{X-API-Key header present?}
+    D -->|Missing| E[HTTP 401 MISSING_API_KEY]
+    D -->|Wrong value| F[HTTP 401 INVALID_API_KEY]
+    D -->|Correct| C
+```
+
+- **Disabled by default** (`api_key = ""`): existing clients work without changes.
+- Enable by setting `MCP_BRIDGEKIT_API_KEY` in environment / `.env`.
+- Public routes (`/health`, `/metrics`, `/events/*`, `/dashboard`, `/`) never call this dependency.
 
 ### `worker.py` — Background Job Execution
 
@@ -194,7 +236,33 @@ flowchart LR
     E -->|No| G[Store error in Redis<br/>Set status: failed]
 ```
 
-Workers run in a separate process. Each job spins up its own MCP session (independent of the main server's pool) to avoid blocking the API.
+Workers run in a separate process. Each job spins up its own MCP session (independent of the main server's pool) to avoid blocking the API. On completion, the worker **pushes** the result via Redis Pub/Sub (SSE) and optionally via webhook HTTP POST.
+
+### `events.py` — SSE Push Notifications (v0.9.0)
+
+Bridges the RQ worker process to connected browser/API clients using Redis Pub/Sub:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI as FastAPI /events/{job_id}
+    participant Redis as Redis Pub/Sub
+    participant Worker as RQ Worker
+
+    Client->>FastAPI: GET /mcp/events/{job_id}
+    FastAPI->>Redis: SUBSCRIBE bridgekit:events:{job_id}
+    Note over FastAPI,Client: SSE connection held open...
+
+    Worker->>Worker: Job completes
+    Worker->>Redis: PUBLISH bridgekit:events:{job_id} {payload}
+    Redis-->>FastAPI: message received
+    FastAPI-->>Client: data: {job_id, status, result}
+    FastAPI->>Redis: UNSUBSCRIBE
+```
+
+- **Redis Pub/Sub** enables cross-process delivery (worker → FastAPI → browser).
+- The SSE stream is **one-shot**: it closes after the completion event.
+- Webhook delivery (`POST settings.webhook_url`) also fires from the worker directly.
 
 ### `config.py` — Settings
 
@@ -210,6 +278,9 @@ graph LR
     S --> |timeout_threshold| CORE
     S --> |session_ttl| CORE
     S --> |job_result_ttl| WORKER[Worker]
+    S --> |api_key| AUTH[auth.py]
+    S --> |rate_limit_per_minute| CORE
+    S --> |max_tool_retries| CORE
 ```
 
 ## Deployment Architecture
@@ -256,6 +327,8 @@ mcp-bridgekit-worker
 |---|---|---|---|
 | `bridgekit:job:{id}:status` | String (JSON) | `job_result_ttl_seconds` | Job state: `queued` / `running` / `completed` / `failed` |
 | `bridgekit:job:{id}:result` | String (JSON) | `job_result_ttl_seconds` | Tool call result (set by worker on completion) |
+| `bridgekit:ratelimit:{user_id}:{bucket}` | Integer | 90 s | Per-user request count for fixed-window rate limiter (`bucket` = floor(unix_time / 60)) |
+| `bridgekit:events:{job_id}` | Pub/Sub channel | Ephemeral | One-shot channel: worker publishes completion, SSE endpoint subscribes |
 | RQ internal keys | Various | Managed by RQ | Queue metadata, job payloads |
 
 ## Concurrency Model

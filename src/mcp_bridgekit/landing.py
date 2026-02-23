@@ -21,7 +21,7 @@ async def landing():
                 <a href="/architecture" class="bg-zinc-800 hover:bg-zinc-700 px-10 py-4 rounded-xl text-xl font-semibold border border-zinc-700">Architecture →</a>
                 <a href="/docs" class="bg-zinc-800 hover:bg-zinc-700 px-10 py-4 rounded-xl text-xl font-semibold border border-zinc-700">API Docs →</a>
             </div>
-            <p class="mt-10 text-zinc-600 text-sm">v0.8.0 • Deploy with Docker or run locally</p>
+            <p class="mt-10 text-zinc-600 text-sm">v0.9.0 • Deploy with Docker or run locally</p>
         </div>
     </body>
     </html>

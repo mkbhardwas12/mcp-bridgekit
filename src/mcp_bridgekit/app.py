@@ -6,6 +6,7 @@ import structlog
 
 from .auth import verify_api_key
 from .core import BridgeKit
+from .events import router as events_router
 from .models import BridgeRequest
 from .dashboard import router as dashboard_router
 from .landing import router as landing_router
@@ -26,11 +27,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MCP BridgeKit",
     description="Embeddable MCP stdio → HTTP bridge with timeout survival",
-    version="0.8.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 app.include_router(landing_router)
 app.include_router(dashboard_router)
+app.include_router(events_router, prefix="/mcp", tags=["Push Notifications"])
 
 
 # ── Protected endpoints (require X-API-Key when auth is enabled) ─────────────
