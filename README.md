@@ -4,7 +4,7 @@
 
 Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user session pooling, real timeout handling with background job fallback, live dashboard.
 
-![Version](https://img.shields.io/badge/version-0.7.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-0.8.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
 
@@ -24,6 +24,7 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 - [API Reference](#api-reference)
 - [Concurrency Model](#concurrency-model)
 - [Configuration](#configuration)
+- [Security (Auth & Rate Limiting)](#security-auth--rate-limiting)
 - [Connecting to Any MCP Server](#connecting-to-any-mcp-server)
 - [Embedding in Your App](#embedding-in-your-app)
 - [Project Structure](#project-structure)
@@ -243,6 +244,11 @@ sequenceDiagram
 - **Session management**: Auto-eviction when pool is full, TTL-based expiry, manual `DELETE /session/{user_id}`
 - **Live dashboard**: HTMX + Tailwind — sessions, jobs, logs, tools (no build step)
 - **Structured logging**: via structlog
+- **API key auth** _(v0.8)_: `X-API-Key` header protection — disabled by default, backward-compatible
+- **Rate limiting** _(v0.8)_: Per-user fixed-window via Redis (default 60 req/min), returns HTTP 429
+- **Retry with backoff** _(v0.8)_: Transient failures retried up to 2× with exponential backoff (1s, 2s)
+- **Prometheus metrics** _(v0.8)_: `GET /metrics` in Prometheus exposition format — scrape with any monitoring stack
+- **Structured error codes** _(v0.8)_: All errors include `error_code` (e.g. `TOOL_CALL_FAILED`, `RATE_LIMITED`)
 
 ## Quickstart
 
@@ -336,6 +342,44 @@ Close a user's MCP session.
 ### `GET /health`
 Health check with stats: active sessions, total requests, errors, queued jobs, known tools.
 
+### `GET /metrics`
+Prometheus-compatible metrics in text exposition format. Safe to scrape without auth.
+
+```
+bridgekit_active_sessions 3
+bridgekit_requests_total 472
+bridgekit_errors_total 2
+bridgekit_queued_jobs 1
+...
+```
+
+Configure Prometheus:
+```yaml
+scrape_configs:
+  - job_name: mcp-bridgekit
+    static_configs:
+      - targets: [bridgekit:8000]
+    metrics_path: /metrics
+```
+
+### Error Response Format (v0.8.0+)
+
+All error payloads include a structured `error_code` field:
+
+```json
+{ "status": "error", "error_code": "TOOL_CALL_FAILED", "message": "...", "attempts": 3 }
+{ "status": "queued", "error_code": "TOOL_TIMED_OUT", "job_id": "..." }
+```
+
+| Error Code | Cause |
+|---|---|
+| `SESSION_CREATE_FAILED` | Could not spawn MCP server subprocess |
+| `TOOL_CALL_FAILED` | Tool raised an exception (after all retries) |
+| `TOOL_TIMED_OUT` | Tool exceeded timeout — job queued |
+| `RATE_LIMITED` | User exceeded requests-per-minute limit |
+| `MISSING_API_KEY` | Auth enabled but header absent |
+| `INVALID_API_KEY` | Wrong API key provided |
+
 ## Concurrency Model
 
 ```mermaid
@@ -374,6 +418,59 @@ Set via environment variables or `.env` file (prefix: `MCP_BRIDGEKIT_`):
 | `JOB_RESULT_TTL_SECONDS` | `600` | How long job results stay in Redis |
 | `DEFAULT_MCP_COMMAND` | `python` | Default MCP server command |
 | `DEFAULT_MCP_ARGS` | `["examples/mcp_server.py"]` | Default MCP server args |
+| `API_KEY` | _(empty)_ | **v0.8** API key for `X-API-Key` header auth. Leave empty to disable. |
+| `RATE_LIMIT_PER_MINUTE` | `60` | **v0.8** Max requests per `user_id` per minute. `0` = disabled. |
+| `MAX_TOOL_RETRIES` | `2` | **v0.8** Retry transient tool failures N times with exponential backoff. |
+
+## Security (Auth & Rate Limiting)
+
+Added in v0.8.0. All features are **opt-in** — defaults are backward-compatible.
+
+### API Key Authentication
+
+Protects `/chat`, `/tools/`, `/job/`, and `/session/` endpoints.
+`/health`, `/metrics`, and `/dashboard` stay public for monitoring tools.
+
+```bash
+# Enable by setting a key
+export MCP_BRIDGEKIT_API_KEY=your-secret-key
+
+# All protected calls need the header
+curl -X POST http://bridgekit:8000/chat \
+  -H "X-API-Key: your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{...}'
+```
+
+Without the key (or with wrong key): HTTP 401 with `error_code: MISSING_API_KEY` or `INVALID_API_KEY`.
+
+### Rate Limiting
+
+Per-user fixed-window rate limiting backed by Redis. Rejects excess requests with HTTP 429.
+
+```bash
+# Default: 60 requests per user_id per minute
+export MCP_BRIDGEKIT_RATE_LIMIT_PER_MINUTE=60
+
+# Disable entirely
+export MCP_BRIDGEKIT_RATE_LIMIT_PER_MINUTE=0
+```
+
+### Retry with Backoff
+
+Transient tool-call failures (e.g. subprocess crash) are automatically retried.
+
+```bash
+# Default: 2 retries — waits 1s, then 2s between attempts
+export MCP_BRIDGEKIT_MAX_TOOL_RETRIES=2
+
+# Disable retries
+export MCP_BRIDGEKIT_MAX_TOOL_RETRIES=0
+```
+
+Note: `TimeoutError` is **never retried** — it immediately queues as a background job.
+
+---
 
 ## Connecting to Any MCP Server
 
