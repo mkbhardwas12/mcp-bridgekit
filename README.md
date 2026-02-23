@@ -8,6 +8,143 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 
 ---
 
+## Table of Contents
+
+- [What Is MCP BridgeKit?](#what-is-mcp-bridgekit)
+- [The Problem It Solves](#the-problem-it-solves)
+- [Use Cases & Scenarios](#use-cases--scenarios)
+- [Architecture](#architecture)
+- [Request Flow](#request-flow)
+- [Key Features](#key-features)
+- [Quickstart](#quickstart)
+- [Docker (Recommended)](#docker-recommended)
+- [API Reference](#api-reference)
+- [Concurrency Model](#concurrency-model)
+- [Configuration](#configuration)
+- [Embedding in Your App](#embedding-in-your-app)
+- [Project Structure](#project-structure)
+- [TypeScript Version](#typescript-version)
+- [Full Architecture Docs](#-full-architecture-docs)
+- [License](#license)
+
+---
+
+## What Is MCP BridgeKit?
+
+**MCP** (Model Context Protocol) is an open standard that lets AI applications connect to external tools and data sources. MCP servers communicate over **stdio** (stdin/stdout) — which means they run as local subprocesses and speak JSON-RPC over pipes.
+
+**The problem**: Web applications (React, Next.js, Vue, mobile apps) can't spawn local subprocesses. They only speak HTTP. There's a protocol mismatch.
+
+**MCP BridgeKit** is the bridge. It sits between your web app and MCP stdio servers, translating HTTP requests into stdio subprocess calls and streaming results back:
+
+```
+Your Web App  ──HTTP──▶  MCP BridgeKit  ──stdio──▶  MCP Server (tool)
+                         (this project)
+```
+
+Think of it as **"nginx for MCP tools"** — a reverse proxy that makes stdio tools available over HTTP.
+
+---
+
+## The Problem It Solves
+
+| Challenge | Without BridgeKit | With BridgeKit |
+|-----------|-------------------|----------------|
+| **Web app needs MCP tools** | Can't — browsers can't spawn subprocesses | `POST /chat` with tool name and args |
+| **Multiple users sharing tools** | Each needs their own server setup | Per-user session pooling (up to 100 concurrent) |
+| **Tool call takes 60 seconds** | HTTP gateway timeout (Vercel 30s, CloudFlare 30s) | Auto-queues as background job, client polls `GET /job/{id}` |
+| **Which tools are available?** | Must read docs or hardcode | `GET /tools/{user_id}` — live discovery |
+| **Monitoring & debugging** | Blind — no visibility | Live dashboard: sessions, jobs, logs, tools |
+| **Session cleanup** | Zombie processes leak memory | Auto-eviction (TTL + pool limit) + manual `DELETE /session/{id}` |
+
+---
+
+## Use Cases & Scenarios
+
+### 1. AI Chatbot with Tool Calling
+
+> **Scenario**: You're building a customer support chatbot in React. The AI can call tools like `search_docs`, `create_ticket`, `check_order_status` — all implemented as MCP servers.
+
+```
+React App → POST /chat {tool: "search_docs", args: {query: "refund policy"}}
+         ← SSE stream with search results
+```
+
+BridgeKit manages one MCP server process per conversation, so each user has isolated state.
+
+### 2. Multi-Tenant SaaS Platform
+
+> **Scenario**: Your SaaS lets customers connect their own MCP tools (data analysis, code generation, API integrations). Each customer uses different tools.
+
+```
+Customer A → POST /chat {user_id: "cust-A", mcp_config: {command: "python", args: ["their_tool.py"]}}
+Customer B → POST /chat {user_id: "cust-B", mcp_config: {command: "node", args: ["their_tool.js"]}}
+```
+
+Each customer gets a dedicated session with their own MCP server. Pool manages up to 100 concurrent sessions with automatic eviction.
+
+### 3. Long-Running Data Processing
+
+> **Scenario**: An MCP tool runs complex SQL queries or ML inference that takes 45 seconds. Your frontend uses Vercel with a 30-second timeout.
+
+```
+Client → POST /chat {tool: "run_analysis", args: {dataset: "sales_2025"}}
+       ← SSE: {status: "queued", job_id: "abc-123"}
+
+# 45 seconds later...
+Client → GET /job/abc-123
+       ← {status: "completed", result: {revenue: 4200000, growth: "12%"}}
+```
+
+BridgeKit's `asyncio.timeout(25s)` catches the slow call, queues it via Redis/RQ, and a background worker completes it.
+
+### 4. Internal Developer Tools
+
+> **Scenario**: Your team has MCP tools for database queries, log analysis, and deployment — you want a single HTTP API to access all of them.
+
+```bash
+# Query production database
+curl -X POST localhost:8000/chat \
+  -d '{"user_id": "dev-1", "tool_name": "query_db", "tool_args": {"sql": "SELECT count(*) FROM users"}}'
+
+# Check which tools are available
+curl localhost:8000/tools/dev-1
+```
+
+Run `docker-compose up` and all your tools are accessible from any HTTP client.
+
+### 5. Webhook / Integration Pipelines
+
+> **Scenario**: A Slack bot, Zapier workflow, or n8n pipeline needs to call MCP tools based on triggers.
+
+```
+Slack Event → Zapier → POST /chat {tool: "summarize", args: {text: "..."}}
+                     ← {result: "Here's the summary..."}
+```
+
+BridgeKit is a standard HTTP API — any integration platform can call it.
+
+### 6. Mobile Applications
+
+> **Scenario**: An iOS/Android app needs to call MCP tools but can't run subprocesses on the device.
+
+```
+Mobile App → POST https://your-server.com/chat
+           ← SSE stream or job_id for polling
+```
+
+Deploy BridgeKit on your server, and mobile clients communicate over HTTPS.
+
+### When NOT to Use BridgeKit
+
+| Scenario | Better Alternative |
+|----------|-------------------|
+| CLI tool calling MCP servers locally | Use MCP SDK directly — no HTTP needed |
+| MCP server already speaks HTTP (Streamable HTTP transport) | Connect directly — no bridge needed |
+| Single-user desktop app | MCP SDK + stdio directly |
+
+---
+
 ## Architecture
 
 ```mermaid
@@ -91,7 +228,7 @@ sequenceDiagram
 
 ---
 
-## What It Does
+## Key Features
 
 - **Per-user sessions**: Each `user_id` gets its own MCP stdio process
 - **Real timeout handling**: `asyncio.timeout()` wraps every tool call — if it exceeds the threshold, the call is automatically queued as a background job via Redis/RQ
@@ -146,7 +283,7 @@ docker-compose up
 
 This starts Redis, the BridgeKit server (port 8000), and the RQ worker.
 
-## API
+## API Reference
 
 ### `POST /chat`
 Call an MCP tool. Returns SSE stream. Auto-queues on timeout.
