@@ -16,5 +16,13 @@ class Settings(BaseSettings):
     default_mcp_command: str = "python"
     default_mcp_args: list[str] = Field(default_factory=lambda: ["examples/mcp_server.py"])
 
+    # ── v0.8.0 production features ───────────────────────────
+    # Auth: leave empty to disable (backward-compatible default)
+    api_key: str = ""
+    # Rate limiting: requests per user per minute (0 = disabled)
+    rate_limit_per_minute: int = 60
+    # Retry: transient tool-call failures will be retried this many times
+    max_tool_retries: int = 2
+
 settings = Settings()
 logger.info("MCP BridgeKit config loaded", **settings.model_dump())

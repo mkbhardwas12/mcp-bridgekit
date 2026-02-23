@@ -13,7 +13,7 @@ from mcp.client.stdio import stdio_client
 from redis.asyncio import Redis as AsyncRedis
 from redis import Redis as SyncRedis
 from rq import Queue
-from .models import BridgeRequest
+from .models import BridgeRequest, ErrorCode
 from .config import settings
 
 logger = structlog.get_logger()
@@ -178,10 +178,32 @@ class BridgeKit:
                 names.add(t["name"])
         return sorted(names)
 
-    # ── Core call (with real timeout) ────────────────────────
+    # ── Core call (with real timeout + retry + rate limiting) ──────────────
 
     async def call(self, req: BridgeRequest) -> StreamingResponse:
         self._request_count += 1
+
+        # ── Rate limit check ─────────────────────────────
+        if not await self._check_rate_limit(req.user_id):
+            self._error_count += 1
+            self._log(
+                f"Rate limit exceeded for {req.user_id} "
+                f"({settings.rate_limit_per_minute} req/min)",
+                level="warning",
+            )
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "status": "error",
+                    "error_code": ErrorCode.RATE_LIMITED,
+                    "message": (
+                        f"Rate limit exceeded: max {settings.rate_limit_per_minute} "
+                        "requests per minute per user."
+                    ),
+                },
+            )
+
         config = req.mcp_config or {
             "command": settings.default_mcp_command,
             "args": settings.default_mcp_args,
@@ -194,54 +216,98 @@ class BridgeKit:
             self._log(f"Session creation failed for {req.user_id}: {e}", level="error")
 
             async def error_stream():
-                yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create MCP session: {e}'})}\n\n"
+                yield (
+                    f"data: {json.dumps({'status': 'error', 'error_code': ErrorCode.SESSION_CREATE_FAILED, 'message': f'Failed to create MCP session: {e}'})}\n\n"
+                )
 
             return StreamingResponse(error_stream(), media_type="text/event-stream")
 
         async def event_stream() -> AsyncGenerator[str, None]:
+            nonlocal session
             tool_name = req.tool_name or "analyze_data"
             tool_args = req.tool_args or {"query": str(req.messages)}
+            last_error: Exception | None = None
 
-            try:
-                # Real timeout — this is the core feature
-                async with asyncio.timeout(settings.timeout_threshold_seconds):
-                    start = time.time()
-                    result = await session.call_tool(tool_name, tool_args)
-                    elapsed = time.time() - start
+            for attempt in range(settings.max_tool_retries + 1):
+                try:
+                    # ── Real timeout — this is the core feature ──────────
+                    async with asyncio.timeout(settings.timeout_threshold_seconds):
+                        start = time.time()
+                        result = await session.call_tool(tool_name, tool_args)
+                        elapsed = time.time() - start
 
-                self._log(f"Tool '{tool_name}' completed in {elapsed:.2f}s for {req.user_id}")
-                yield f"data: {json.dumps(result.model_dump(), default=str)}\n\n"
+                    self._log(
+                        f"Tool '{tool_name}' completed in {elapsed:.2f}s "
+                        f"for {req.user_id}"
+                        + (f" (attempt {attempt + 1})" if attempt > 0 else "")
+                    )
+                    yield f"data: {json.dumps(result.model_dump(), default=str)}\n\n"
+                    return  # Success — exit the retry loop
 
-            except (asyncio.TimeoutError, TimeoutError):
-                # Tool took too long — queue it as a background job
-                job_id = str(uuid.uuid4())
-                job_payload = {
-                    "user_id": req.user_id,
-                    "tool_name": tool_name,
-                    "tool_args": tool_args,
-                    "mcp_config": config,
-                }
-                # Async Redis — non-blocking!
-                await self.redis.setex(
-                    f"bridgekit:job:{job_id}:status", settings.job_result_ttl_seconds,
-                    json.dumps({"status": "queued", "created_at": datetime.now().isoformat()})
-                )
-                self.queue.enqueue(
-                    "mcp_bridgekit.worker.process_job",
-                    job_payload, job_id,
-                    job_id=job_id,
-                    job_timeout=settings.job_result_ttl_seconds,
-                )
-                self._log(f"Tool '{tool_name}' timed out after {settings.timeout_threshold_seconds}s — queued as job {job_id}")
-                yield f"data: {json.dumps({'status': 'queued', 'job_id': job_id})}\n\n"
+                except (asyncio.TimeoutError, TimeoutError):
+                    # Timeout is not retried — queue immediately as a background job
+                    job_id = str(uuid.uuid4())
+                    job_payload = {
+                        "user_id": req.user_id,
+                        "tool_name": tool_name,
+                        "tool_args": tool_args,
+                        "mcp_config": config,
+                    }
+                    await self.redis.setex(
+                        f"bridgekit:job:{job_id}:status",
+                        settings.job_result_ttl_seconds,
+                        json.dumps(
+                            {"status": "queued", "created_at": datetime.now().isoformat()}
+                        ),
+                    )
+                    self.queue.enqueue(
+                        "mcp_bridgekit.worker.process_job",
+                        job_payload,
+                        job_id,
+                        job_id=job_id,
+                        job_timeout=settings.job_result_ttl_seconds,
+                    )
+                    self._log(
+                        f"Tool '{tool_name}' timed out after "
+                        f"{settings.timeout_threshold_seconds}s — queued as job {job_id}"
+                    )
+                    yield (
+                        f"data: {json.dumps({'status': 'queued', 'error_code': ErrorCode.TOOL_TIMED_OUT, 'job_id': job_id})}\n\n"
+                    )
+                    return  # Exit — job is queued, no retry
 
-            except Exception as e:
-                self._error_count += 1
-                self._log(f"Error calling '{tool_name}' for {req.user_id}: {e}", level="error")
-                # Session might be dead — remove it so next request reconnects
-                if user_id := req.user_id:
-                    self.sessions.pop(user_id, None)
-                yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+                except Exception as e:
+                    last_error = e
+                    is_last_attempt = attempt >= settings.max_tool_retries
+
+                    if not is_last_attempt:
+                        wait_seconds = 2 ** attempt  # 1s, 2s (for attempts 0, 1)
+                        self._log(
+                            f"Tool '{tool_name}' attempt {attempt + 1}/"
+                            f"{settings.max_tool_retries + 1} failed — "
+                            f"retrying in {wait_seconds}s: {e}",
+                            level="warning",
+                        )
+                        # Session may be dead — evict and reconnect before next attempt
+                        self.sessions.pop(req.user_id, None)
+                        try:
+                            session = await self.get_session(req.user_id, config)
+                        except Exception:
+                            pass  # Will fail again on next attempt — that's fine
+                        await asyncio.sleep(wait_seconds)
+                    # else: fall through to error yield below
+
+            # All retry attempts exhausted
+            self._error_count += 1
+            self._log(
+                f"Tool '{tool_name}' failed after {settings.max_tool_retries + 1} "
+                f"attempt(s) for {req.user_id}: {last_error}",
+                level="error",
+            )
+            self.sessions.pop(req.user_id, None)
+            yield (
+                f"data: {json.dumps({'status': 'error', 'error_code': ErrorCode.TOOL_CALL_FAILED, 'message': str(last_error), 'attempts': settings.max_tool_retries + 1})}\n\n"
+            )
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -277,3 +343,23 @@ class BridgeKit:
             "known_tools": len(self.get_all_tool_names()),
             "cached_tool_lists": len(self._tool_cache),
         }
+
+    # ── Rate limiting ─────────────────────────────────────────
+
+    async def _check_rate_limit(self, user_id: str) -> bool:
+        """Returns True if the request is allowed, False if the rate limit is exceeded.
+
+        Uses a per-user, per-minute counter in Redis (simple fixed-window).
+        Set rate_limit_per_minute=0 in config to disable.
+        """
+        if not settings.rate_limit_per_minute:
+            return True  # Disabled
+
+        # Bucket key: one per user per UTC minute
+        bucket = int(time.time() // 60)
+        key = f"bridgekit:ratelimit:{user_id}:{bucket}"
+        count = await self.redis.incr(key)
+        if count == 1:
+            # First request in this window — set TTL so the key auto-cleans
+            await self.redis.expire(key, 90)  # 90s > 60s — covers clock skew
+        return count <= settings.rate_limit_per_minute
