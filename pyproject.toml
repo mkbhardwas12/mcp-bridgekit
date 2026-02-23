@@ -21,6 +21,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "ruff", "black"]
 
+[dependency-groups]
+dev = ["pytest>=8.0.0", "ruff", "black"]
+
 [project.scripts]
 mcp-bridgekit-worker = "mcp_bridgekit.worker:main"
 
