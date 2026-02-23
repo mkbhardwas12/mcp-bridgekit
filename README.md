@@ -4,7 +4,9 @@
 
 Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user session pooling, real timeout handling with background job fallback, live dashboard.
 
-![Version](https://img.shields.io/badge/version-0.6.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
 
 ---
 
@@ -18,6 +20,7 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 - [Key Features](#key-features)
 - [Quickstart](#quickstart)
 - [Docker (Recommended)](#docker-recommended)
+- [One-Click Deploy (Vercel)](#one-click-deploy-vercel)
 - [API Reference](#api-reference)
 - [Concurrency Model](#concurrency-model)
 - [Configuration](#configuration)
@@ -281,7 +284,18 @@ graph TB
 docker-compose up
 ```
 
-This starts Redis, the BridgeKit server (port 8000), and the RQ worker.
+This starts Redis, the BridgeKit server (port 8000), and 3 RQ worker replicas.
+
+## One-Click Deploy (Vercel)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
+
+Click the button above to deploy your own instance. You'll need:
+
+1. A **Redis instance** (e.g., [Upstash](https://upstash.com), [Railway](https://railway.app), or [Redis Cloud](https://redis.com/cloud/))
+2. Set the `MCP_BRIDGEKIT_REDIS_URL` environment variable during setup
+
+> **Note**: Vercel's 30s function timeout is exactly why BridgeKit exists — any MCP tool call exceeding 25s is automatically queued as a background job. Your users get a `job_id` instantly and poll for results.
 
 ## API Reference
 
