@@ -425,7 +425,7 @@ graph TD
     UL1 -->|serialize| S1[Session: user-abc\nMCP stdio process]
     UL2 -->|serialize| S2[Session: user-xyz\nMCP stdio process]
 
-    S1 -->|max 100 sessions| POOL[(Session Pool\nTTL: 3600s\nEviction: oldest)]
+    S1 --> POOL[(Session Pool\nTTL: 3600s\nEviction: oldest)]
     S2 --> POOL
 
     style GL fill:#ef4444,stroke:#dc2626,color:#fff
