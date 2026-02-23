@@ -31,10 +31,15 @@ jobs:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: pypi
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish to PyPI
+        if: env.PYPI_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         with:
           password: ${{ secrets.PYPI_TOKEN }}
