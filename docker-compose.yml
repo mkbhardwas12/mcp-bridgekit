@@ -2,17 +2,36 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   bridgekit:
     build: .
     ports: ["8000:8000"]
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - MCP_BRIDGEKIT_REDIS_URL=redis://redis:6379
+      - MCP_BRIDGEKIT_MAX_SESSIONS=200
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
   worker:
     build: .
     command: mcp-bridgekit-worker
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - MCP_BRIDGEKIT_REDIS_URL=redis://redis:6379
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 512M

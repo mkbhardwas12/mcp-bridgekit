@@ -10,7 +10,8 @@ import structlog
 from fastapi.responses import StreamingResponse
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from redis import Redis
+from redis.asyncio import Redis as AsyncRedis
+from redis import Redis as SyncRedis
 from rq import Queue
 from .models import BridgeRequest
 from .config import settings
@@ -19,17 +20,29 @@ logger = structlog.get_logger()
 
 
 class BridgeKit:
-    """Core MCP stdio → HTTP bridge with session pooling, timeouts, and background jobs."""
+    """Core MCP stdio → HTTP bridge with session pooling, timeouts, and background jobs.
+
+    Designed for 100+ concurrent users:
+    - Async Redis (non-blocking I/O)
+    - Per-user locks (different users never block each other)
+    - Session health checks with automatic reconnection
+    - Pool eviction (oldest-first) when max_sessions reached
+    - Background job queue for slow tools
+    """
 
     def __init__(self, redis_url: str | None = None):
         url = redis_url or settings.redis_url
-        self.redis = Redis.from_url(url, decode_responses=True)
-        self.queue = Queue(connection=Redis.from_url(url))
+        # Async Redis for non-blocking I/O in the event loop
+        self.redis = AsyncRedis.from_url(url, decode_responses=True)
+        # Sync Redis for RQ (RQ requires synchronous connection)
+        self.queue = Queue(connection=SyncRedis.from_url(url))
         self.sessions: Dict[str, tuple[ClientSession, AsyncExitStack, float]] = {}
         self.locks: Dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
-        self.recent_logs: deque = deque(maxlen=100)
+        self.recent_logs: deque = deque(maxlen=200)
         self.known_tools: Dict[str, list[dict]] = {}
+        self._request_count = 0
+        self._error_count = 0
 
     # ── Logging ──────────────────────────────────────────────
 
@@ -56,9 +69,12 @@ class BridgeKit:
                 session, stack, created_at = self.sessions[user_id]
                 age = time.time() - created_at
                 if age < settings.session_ttl_seconds:
-                    return session
-                # Session expired — clean it up
-                self._log(f"Session expired for {user_id} (age={age:.0f}s)")
+                    # Health check — verify session is still responsive
+                    if await self._is_session_alive(session):
+                        return session
+                    self._log(f"Session dead for {user_id}, reconnecting")
+                else:
+                    self._log(f"Session expired for {user_id} (age={age:.0f}s)")
                 await self._close_stack(stack)
                 del self.sessions[user_id]
 
@@ -84,6 +100,15 @@ class BridgeKit:
             await self._discover_tools(user_id, session)
 
             return session
+
+    async def _is_session_alive(self, session: ClientSession) -> bool:
+        """Quick health check — call list_tools with a short timeout."""
+        try:
+            async with asyncio.timeout(3.0):
+                await session.list_tools()
+            return True
+        except Exception:
+            return False
 
     async def _discover_tools(self, user_id: str, session: ClientSession):
         """Fetch available tools from the MCP server and cache them."""
@@ -115,6 +140,7 @@ class BridgeKit:
         """Graceful shutdown — close all sessions."""
         for user_id in list(self.sessions.keys()):
             await self.cleanup_session(user_id)
+        await self.redis.aclose()
         self._log("All sessions cleaned")
 
     # ── Tool listing ─────────────────────────────────────────
@@ -137,11 +163,22 @@ class BridgeKit:
     # ── Core call (with real timeout) ────────────────────────
 
     async def call(self, req: BridgeRequest) -> StreamingResponse:
+        self._request_count += 1
         config = req.mcp_config or {
             "command": settings.default_mcp_command,
             "args": settings.default_mcp_args,
         }
-        session = await self.get_session(req.user_id, config)
+
+        try:
+            session = await self.get_session(req.user_id, config)
+        except Exception as e:
+            self._error_count += 1
+            self._log(f"Session creation failed for {req.user_id}: {e}", level="error")
+
+            async def error_stream():
+                yield f"data: {json.dumps({'status': 'error', 'message': f'Failed to create MCP session: {e}'})}\n\n"
+
+            return StreamingResponse(error_stream(), media_type="text/event-stream")
 
         async def event_stream() -> AsyncGenerator[str, None]:
             tool_name = req.tool_name or "analyze_data"
@@ -166,7 +203,8 @@ class BridgeKit:
                     "tool_args": tool_args,
                     "mcp_config": config,
                 }
-                self.redis.setex(
+                # Async Redis — non-blocking!
+                await self.redis.setex(
                     f"bridgekit:job:{job_id}:status", settings.job_result_ttl_seconds,
                     json.dumps({"status": "queued", "created_at": datetime.now().isoformat()})
                 )
@@ -180,27 +218,43 @@ class BridgeKit:
                 yield f"data: {json.dumps({'status': 'queued', 'job_id': job_id})}\n\n"
 
             except Exception as e:
+                self._error_count += 1
                 self._log(f"Error calling '{tool_name}' for {req.user_id}: {e}", level="error")
+                # Session might be dead — remove it so next request reconnects
+                if user_id := req.user_id:
+                    self.sessions.pop(user_id, None)
                 yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    # ── Job result retrieval ─────────────────────────────────
+    # ── Job result retrieval (async) ─────────────────────────
 
-    def get_job_status(self, job_id: str) -> dict:
-        """Check the status/result of a background job."""
+    async def get_job_status(self, job_id: str) -> dict:
+        """Check the status/result of a background job (non-blocking)."""
         status_key = f"bridgekit:job:{job_id}:status"
         result_key = f"bridgekit:job:{job_id}:result"
 
-        status_raw = self.redis.get(status_key)
+        status_raw = await self.redis.get(status_key)
         if not status_raw:
             return {"status": "not_found", "job_id": job_id}
 
         status = json.loads(status_raw)
 
-        result_raw = self.redis.get(result_key)
+        result_raw = await self.redis.get(result_key)
         if result_raw:
             status["result"] = json.loads(result_raw)
             status["status"] = "completed"
 
         return {"job_id": job_id, **status}
+
+    # ── Stats for dashboard / health ─────────────────────────
+
+    def get_stats(self) -> dict:
+        return {
+            "active_sessions": len(self.sessions),
+            "max_sessions": settings.max_sessions,
+            "total_requests": self._request_count,
+            "total_errors": self._error_count,
+            "queued_jobs": self.queue.count,
+            "known_tools": len(self.get_all_tool_names()),
+        }

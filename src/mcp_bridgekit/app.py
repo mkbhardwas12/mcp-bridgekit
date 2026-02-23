@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MCP BridgeKit",
     description="Embeddable MCP stdio → HTTP bridge with timeout survival",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 app.include_router(landing_router)
@@ -48,7 +48,7 @@ async def list_tools(user_id: str, command: str = "python", args: str = "example
 @app.get("/job/{job_id}")
 async def job_status(job_id: str):
     """Poll the status/result of a background job."""
-    return app.state.bridge.get_job_status(job_id)
+    return await app.state.bridge.get_job_status(job_id)
 
 
 @app.delete("/session/{user_id}")
@@ -60,10 +60,7 @@ async def delete_session(user_id: str):
 
 @app.get("/health")
 async def health():
-    """Health check."""
+    """Health check with detailed stats."""
     bridge = app.state.bridge
-    return {
-        "status": "ok",
-        "active_sessions": len(bridge.sessions),
-        "queued_jobs": bridge.queue.count,
-    }
+    stats = bridge.get_stats()
+    return {"status": "ok", **stats}
