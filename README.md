@@ -4,7 +4,7 @@
 
 Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user session pooling, real timeout handling with background job fallback, live dashboard.
 
-![Version](https://img.shields.io/badge/version-0.8.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-0.9.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
 
@@ -25,6 +25,7 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 - [Concurrency Model](#concurrency-model)
 - [Configuration](#configuration)
 - [Security (Auth & Rate Limiting)](#security-auth--rate-limiting)
+- [Push Notifications (Webhook & SSE)](#push-notifications-webhook--sse)
 - [Connecting to Any MCP Server](#connecting-to-any-mcp-server)
 - [Embedding in Your App](#embedding-in-your-app)
 - [Project Structure](#project-structure)
@@ -249,6 +250,8 @@ sequenceDiagram
 - **Retry with backoff** _(v0.8)_: Transient failures retried up to 2× with exponential backoff (1s, 2s)
 - **Prometheus metrics** _(v0.8)_: `GET /metrics` in Prometheus exposition format — scrape with any monitoring stack
 - **Structured error codes** _(v0.8)_: All errors include `error_code` (e.g. `TOOL_CALL_FAILED`, `RATE_LIMITED`)
+- **Webhook push** _(v0.9)_: Worker POSTs job result to your URL when a background job completes
+- **SSE push** _(v0.9)_: `GET /mcp/events/{job_id}` — browser/client listens in real-time, stream closes automatically on completion
 
 ## Quickstart
 
@@ -362,6 +365,32 @@ scrape_configs:
     metrics_path: /metrics
 ```
 
+### `GET /mcp/events/{job_id}` _(v0.9)_
+
+Server-Sent Events stream. Connect after submitting a long job; fires **one event** when the background job completes, then closes automatically. No auth required.
+
+```javascript
+const es = new EventSource(`/mcp/events/${jobId}`);
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.status === 'completed') {
+    console.log('Job done!', data.result);
+    es.close();
+  }
+};
+```
+
+Event payload:
+```json
+{
+  "job_id": "abc-123",
+  "status": "completed",
+  "result": { ... },
+  "user_id": "user-456",
+  "completed_at": "2026-02-23T12:00:00+00:00"
+}
+```
+
 ### Error Response Format (v0.8.0+)
 
 All error payloads include a structured `error_code` field:
@@ -421,6 +450,8 @@ Set via environment variables or `.env` file (prefix: `MCP_BRIDGEKIT_`):
 | `API_KEY` | _(empty)_ | **v0.8** API key for `X-API-Key` header auth. Leave empty to disable. |
 | `RATE_LIMIT_PER_MINUTE` | `60` | **v0.8** Max requests per `user_id` per minute. `0` = disabled. |
 | `MAX_TOOL_RETRIES` | `2` | **v0.8** Retry transient tool failures N times with exponential backoff. |
+| `WEBHOOK_URL` | _(empty)_ | **v0.9** URL to POST job completion payload to. Leave empty to disable. |
+| `ENABLE_SSE` | `true` | **v0.9** Publish completion events to `GET /mcp/events/{job_id}`. |
 
 ## Security (Auth & Rate Limiting)
 
@@ -469,6 +500,73 @@ export MCP_BRIDGEKIT_MAX_TOOL_RETRIES=0
 ```
 
 Note: `TimeoutError` is **never retried** — it immediately queues as a background job.
+
+---
+
+## Push Notifications (Webhook & SSE)
+
+Added in v0.9.0. Instead of polling `GET /job/{job_id}`, get **instant push** when a background job finishes.
+
+### Option 1: Webhook (AWS API / backend)
+
+BridgeKit POSTs the result to your configured URL when any background job completes.
+
+```bash
+export MCP_BRIDGEKIT_WEBHOOK_URL=https://your-api.example.com/webhook/mcp
+```
+
+Payload your endpoint receives:
+```json
+{
+  "job_id": "abc-123",
+  "status": "completed",
+  "result": { ... },
+  "user_id": "user-456",
+  "completed_at": "2026-02-23T12:00:00+00:00"
+}
+```
+
+Webhook failures are caught and logged — they never crash the worker.
+
+### Option 2: SSE (browser / real-time frontend)
+
+Your frontend holds open a Server-Sent Events connection. The stream closes automatically after the completion event.
+
+```javascript
+// After POST /chat returns {status: "queued", job_id: "abc-123"}
+const es = new EventSource(`/mcp/events/abc-123`);
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.status === 'completed') {
+    renderResult(data.result);
+    es.close();
+  }
+};
+```
+
+SSE uses Redis Pub/Sub internally, so it works correctly when the API server and RQ worker are in separate processes/containers.
+
+### Using Both Together (AWS example)
+
+```python
+# Your AWS Lambda / FastAPI endpoint
+@app.post("/api/v1/analyze")
+async def analyze(req: BridgeRequest):
+    result = await bridge.call(req)
+    if result.status == "queued":
+        return {
+            "status": "queued",
+            "job_id": result.job_id,
+            "sse_url": f"https://bridgekit.yourdomain.com/mcp/events/{result.job_id}"
+        }
+    return result
+```
+
+Disable either channel independently:
+```bash
+MCP_BRIDGEKIT_ENABLE_SSE=false      # turn off SSE, keep webhook
+MCP_BRIDGEKIT_WEBHOOK_URL=          # leave empty to disable webhook
+```
 
 ---
 
