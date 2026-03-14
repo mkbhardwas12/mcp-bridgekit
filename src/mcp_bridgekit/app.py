@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 import structlog
 
@@ -26,16 +27,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MCP BridgeKit",
-    description="Embeddable MCP stdio → HTTP bridge with timeout survival",
+    description="Embeddable MCP stdio -> HTTP bridge with timeout survival",
     version="0.9.0",
     lifespan=lifespan,
 )
+
+# CORS — required for web apps calling the bridge from different origins.
+# Defaults are permissive for development; tighten allow_origins in production.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(landing_router)
 app.include_router(dashboard_router)
 app.include_router(events_router, prefix="/mcp", tags=["Push Notifications"])
 
 
-# ── Protected endpoints (require X-API-Key when auth is enabled) ─────────────
+# -- Protected endpoints (require X-API-Key when auth is enabled) -------------
 
 @app.post("/chat", dependencies=[Depends(verify_api_key)])
 async def chat(req: BridgeRequest):
@@ -64,7 +76,7 @@ async def delete_session(user_id: str):
     return {"status": "ok", "user_id": user_id}
 
 
-# ── Public endpoints (no auth — monitoring & UI) ─────────────────────────────
+# -- Public endpoints (no auth — monitoring & UI) -----------------------------
 
 @app.get("/health")
 async def health():
