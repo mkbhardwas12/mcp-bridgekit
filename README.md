@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/mkbhardwas12-mcp-bridgekit-badge.png)](https://mseep.ai/app/mkbhardwas12-mcp-bridgekit)
+
 # MCP BridgeKit
 
 **Embeddable MCP stdio → HTTP bridge for web chatbots.**
