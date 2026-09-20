@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/mkbhardwas12/mcp-bridgekit/security/advisories/new
+    about: Please do not file vulnerabilities as public issues. Reporters are credited in CHANGELOG.md.
+  - name: Integration guide
+    url: https://github.com/mkbhardwas12/mcp-bridgekit/blob/main/docs/INTEGRATION_GUIDE.md
+    about: Connecting your API or web app to any MCP server through BridgeKit.

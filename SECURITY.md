@@ -27,5 +27,5 @@ they ask otherwise.
   BridgeKit to spawn.
 - `/health`, `/metrics`, `/dashboard`, and `/mcp/events/{job_id}` are intentionally public for
   monitoring; put BridgeKit behind a reverse proxy if you need to restrict them.
-- Prefer binding to a private interface (e.g. `127.0.0.1:8000:8000` in `docker-compose.yml`) and
-  fronting with TLS.
+- `docker-compose.yml` binds to `127.0.0.1` by default. Set `MCP_BRIDGEKIT_BIND=0.0.0.0` only when
+  BridgeKit sits behind TLS and a reverse proxy.

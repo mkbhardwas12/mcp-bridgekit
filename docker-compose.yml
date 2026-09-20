@@ -1,7 +1,8 @@
 services:
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    # Only the containers need Redis; expose to the host loopback for local debugging only
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -10,7 +11,8 @@ services:
 
   bridgekit:
     build: .
-    ports: ["8000:8000"]
+    # Loopback by default. To expose publicly (behind TLS/reverse proxy): MCP_BRIDGEKIT_BIND=0.0.0.0
+    ports: ["${MCP_BRIDGEKIT_BIND:-127.0.0.1}:8000:8000"]
     depends_on:
       redis:
         condition: service_healthy

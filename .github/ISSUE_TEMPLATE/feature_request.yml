@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose an enhancement or a new MCP server recipe
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case — which web app, which MCP server, what breaks today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Config flag? New endpoint? Docs? Rough API sketch is great.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd like to implement this myself (you'll be credited in CHANGELOG.md and the README).

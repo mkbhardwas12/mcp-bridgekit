@@ -1,10 +1,26 @@
 [project]
 name = "mcp-bridgekit"
 version = "0.10.0"
-description = "Embeddable MCP stdio → HTTP bridge with timeout survival"
+description = "Embeddable MCP stdio → HTTP bridge: per-user session pooling, timeout survival via background jobs, fail-closed auth, live dashboard"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [{ name = "Manish Kumar" }]
+keywords = ["mcp", "model-context-protocol", "fastapi", "sse", "redis", "rq", "ai-agents", "llm-tools", "bridge", "gateway"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
@@ -27,6 +43,13 @@ dev = ["pytest>=8.0.0", "ruff", "black"]
 
 [project.scripts]
 mcp-bridgekit-worker = "mcp_bridgekit.worker:main"
+
+[project.urls]
+Homepage = "https://github.com/mkbhardwas12/mcp-bridgekit"
+Documentation = "https://github.com/mkbhardwas12/mcp-bridgekit#readme"
+Changelog = "https://github.com/mkbhardwas12/mcp-bridgekit/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mkbhardwas12/mcp-bridgekit/issues"
+Security = "https://github.com/mkbhardwas12/mcp-bridgekit/blob/main/SECURITY.md"
 
 [build-system]
 requires = ["setuptools>=45", "wheel", "setuptools-scm"]

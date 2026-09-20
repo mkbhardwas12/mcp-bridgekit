@@ -6,9 +6,24 @@ on:
     tags: [ 'v*' ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - run: uv run ruff check src tests examples
+
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     services:
       redis:
         image: redis:7-alpine
@@ -22,24 +37,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
       - run: uv sync --dev
       - run: uv run pytest -v
         env:
           MCP_BRIDGEKIT_REDIS_URL: redis://localhost:6379
 
   publish:
-    needs: test
+    needs: [lint, test]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      id-token: write   # PyPI trusted publishing (OIDC) — no API token stored in GitHub
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv build
       - name: Publish to PyPI
-        if: env.PYPI_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}

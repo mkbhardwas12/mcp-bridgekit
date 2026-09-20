@@ -3,6 +3,24 @@
 All notable changes to MCP BridgeKit are documented here.
 Contributors are credited on the change they made or reported.
 
+## [Unreleased]
+
+### Security
+- `docker-compose.yml` binds BridgeKit to `127.0.0.1` by default (override with
+  `MCP_BRIDGEKIT_BIND=0.0.0.0` when fronted by TLS / a reverse proxy) and no longer exposes Redis
+  beyond the host loopback. Suggested by [@shunfeng8421](https://github.com/shunfeng8421) in
+  [#3](https://github.com/mkbhardwas12/mcp-bridgekit/issues/3).
+- Private vulnerability reporting enabled on the repository.
+
+### Added
+- `CONTRIBUTING.md`, issue/PR templates, Dependabot config.
+- CI: lint job, Python 3.11/3.12/3.13 test matrix, PyPI trusted publishing (no stored token).
+- PyPI metadata: classifiers, keywords, project URLs.
+
+### Changed
+- Version string is read from `mcp_bridgekit.__version__` everywhere (FastAPI docs, landing page).
+- README: new hero, status badges, 60-second demo.
+
 ## [0.10.0] — 2026-09-20
 
 ### Security

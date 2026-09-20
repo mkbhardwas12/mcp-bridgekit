@@ -1,0 +1,45 @@
+name: Bug report
+description: Something isn't working as documented
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: BridgeKit version
+      placeholder: "0.10.0 (see /health or pip show mcp-bridgekit)"
+    validations:
+      required: true
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: How are you running it?
+      options:
+        - docker compose
+        - uvicorn / gunicorn locally
+        - Vercel
+        - Other (describe below)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the request you sent (redact your API key) and the response / error_code.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Security
+      options:
+        - label: This is **not** a security vulnerability. (If it is, please use [private reporting](https://github.com/mkbhardwas12/mcp-bridgekit/security/advisories/new) instead.)
+          required: true

@@ -1,12 +1,46 @@
+<div align="center">
+
 # MCP BridgeKit
 
-**Embeddable MCP stdio → HTTP bridge for web chatbots.**
+**Turn any MCP stdio server into a production HTTP API your web app can call.**
 
-Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user session pooling, real timeout handling with background job fallback, live dashboard.
+Per-user session pooling · real timeout handling with background-job fallback · fail-closed auth · live dashboard
 
-![Version](https://img.shields.io/badge/version-0.10.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+[![CI](https://github.com/mkbhardwas12/mcp-bridgekit/actions/workflows/ci.yml/badge.svg)](https://github.com/mkbhardwas12/mcp-bridgekit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mkbhardwas12/mcp-bridgekit?color=blue)](https://github.com/mkbhardwas12/mcp-bridgekit/releases)
+[![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Security policy](https://img.shields.io/badge/security-policy-informational)](SECURITY.md)
+[![Stars](https://img.shields.io/github/stars/mkbhardwas12/mcp-bridgekit?style=social)](https://github.com/mkbhardwas12/mcp-bridgekit/stargazers)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL,MCP_BRIDGEKIT_API_KEY&envDescription=Redis%20URL%20for%20sessions%2Fjobs%20and%20an%20API%20key%20for%20X-API-Key%20auth&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
+
+</div>
+
+```
+Your Web App  ──HTTP──▶  MCP BridgeKit  ──stdio──▶  MCP Server (tool)
+ (React, Next.js,        pooling · timeouts ·        (python, node, npx …)
+  mobile, backend)       jobs · auth · dashboard
+```
+
+### 60-second demo
+
+```bash
+git clone https://github.com/mkbhardwas12/mcp-bridgekit.git && cd mcp-bridgekit
+export MCP_BRIDGEKIT_API_KEY=$(openssl rand -hex 32)
+docker compose up -d                    # Redis + API + 3 workers
+
+curl -s -H "X-API-Key: $MCP_BRIDGEKIT_API_KEY" localhost:8000/tools/demo | jq .tools[].name
+# "analyze_data"
+
+curl -s -N -H "X-API-Key: $MCP_BRIDGEKIT_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"user_id":"demo","messages":[],"tool_name":"analyze_data","tool_args":{"query":"Q4 revenue"}}' \
+  localhost:8000/chat
+# data: {"content":[{"type":"text","text":"..."}], ...}     ← streamed over SSE
+# …or, if the tool runs >25s:  data: {"status":"queued","job_id":"…"}  → GET /job/{id} or SSE /mcp/events/{id}
+```
+
+Open http://localhost:8000/dashboard for live sessions, jobs, logs and tools.
 
 ---
 
@@ -33,6 +67,7 @@ Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user se
 - [End-to-End Testing Guide](#end-to-end-testing-guide)
 - [Horizontal Scaling](#horizontal-scaling)
 - [Full Architecture Docs](#-full-architecture-docs)
+- [Contributing & Security](#contributing--security)
 - [License](#license)
 
 ---
@@ -311,6 +346,12 @@ docker-compose up
 
 This starts Redis, the BridgeKit server (port 8000), and 3 RQ worker replicas. Compose refuses to start without `MCP_BRIDGEKIT_API_KEY`.
 
+By default the API is bound to **127.0.0.1** only. To expose it (behind TLS / a reverse proxy):
+
+```bash
+MCP_BRIDGEKIT_BIND=0.0.0.0 docker-compose up
+```
+
 ## One-Click Deploy (Vercel)
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
@@ -318,7 +359,7 @@ This starts Redis, the BridgeKit server (port 8000), and 3 RQ worker replicas. C
 Click the button above to deploy your own instance. You'll need:
 
 1. A **Redis instance** (e.g., [Upstash](https://upstash.com), [Railway](https://railway.app), or [Redis Cloud](https://redis.com/cloud/))
-2. Set the `MCP_BRIDGEKIT_REDIS_URL` environment variable during setup
+2. Set `MCP_BRIDGEKIT_REDIS_URL` and `MCP_BRIDGEKIT_API_KEY` (e.g. `openssl rand -hex 32`) during setup
 
 > **Note**: Vercel's 30s function timeout is exactly why BridgeKit exists — any MCP tool call exceeding 25s is automatically queued as a background job. Your users get a `job_id` instantly and poll for results.
 
@@ -793,8 +834,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams and component docs.
 
 ## Contributing & Security
 
-Issues and pull requests are welcome. Every fix or hardening that lands is credited in [CHANGELOG.md](CHANGELOG.md).
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Every fix or hardening that lands is credited in [CHANGELOG.md](CHANGELOG.md).
+To report a vulnerability privately, use [GitHub's security advisories](https://github.com/mkbhardwas12/mcp-bridgekit/security/advisories/new) — details in [SECURITY.md](SECURITY.md).
 
 ### Acknowledgements
 

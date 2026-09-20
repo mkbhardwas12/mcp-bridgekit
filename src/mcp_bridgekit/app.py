@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends
 from fastapi.responses import PlainTextResponse
 import structlog
 
+from . import __version__
 from .auth import verify_api_key
 from .core import BridgeKit
 from .config import settings
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MCP BridgeKit",
     description="Embeddable MCP stdio → HTTP bridge with timeout survival",
-    version="0.10.0",
+    version=__version__,
     lifespan=lifespan,
 )
 app.include_router(landing_router)
