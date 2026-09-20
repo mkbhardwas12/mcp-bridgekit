@@ -5,9 +5,9 @@ import uuid
 from collections import deque
 from contextlib import AsyncExitStack
 from datetime import datetime
-from typing import Dict, AsyncGenerator, Any
+from typing import Dict, AsyncGenerator
 import structlog
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from redis.asyncio import Redis as AsyncRedis
@@ -17,6 +17,28 @@ from .models import BridgeRequest, ErrorCode
 from .config import settings
 
 logger = structlog.get_logger()
+
+
+class CommandNotAllowedError(ValueError):
+    """Raised when an MCP launch config names a command outside the allowlist."""
+
+
+def allowed_mcp_commands() -> set[str]:
+    return set(settings.allowed_mcp_commands) | {settings.default_mcp_command}
+
+
+def validate_mcp_config(config: dict) -> dict:
+    """Return a sanitised {command, args} dict or raise CommandNotAllowedError."""
+    command = config.get("command")
+    if not isinstance(command, str) or command not in allowed_mcp_commands():
+        raise CommandNotAllowedError(
+            f"MCP command {command!r} is not allowed. "
+            f"Allowed: {sorted(allowed_mcp_commands())}"
+        )
+    args = config.get("args") or []
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise CommandNotAllowedError("MCP args must be a list of strings")
+    return {"command": command, "args": list(args)}
 
 
 class BridgeKit:
@@ -65,6 +87,7 @@ class BridgeKit:
     # ── Session lifecycle ────────────────────────────────────
 
     async def get_session(self, user_id: str, config: dict) -> ClientSession:
+        config = validate_mcp_config(config)
         lock = await self._get_lock(user_id)
         async with lock:
             # Return existing session if alive and not expired
@@ -191,7 +214,6 @@ class BridgeKit:
                 f"({settings.rate_limit_per_minute} req/min)",
                 level="warning",
             )
-            from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=429,
                 content={
@@ -204,20 +226,35 @@ class BridgeKit:
                 },
             )
 
-        config = req.mcp_config or {
+        config = req.mcp_config.model_dump() if req.mcp_config else {
             "command": settings.default_mcp_command,
             "args": settings.default_mcp_args,
         }
+        try:
+            config = validate_mcp_config(config)
+        except CommandNotAllowedError as e:
+            self._error_count += 1
+            self._log(f"Rejected mcp_config for {req.user_id}: {e}", level="warning")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error_code": ErrorCode.COMMAND_NOT_ALLOWED,
+                    "message": str(e),
+                },
+            )
 
         try:
             session = await self.get_session(req.user_id, config)
         except Exception as e:
             self._error_count += 1
             self._log(f"Session creation failed for {req.user_id}: {e}", level="error")
+            # `e` is unbound once the except block exits; capture for the generator
+            error_message = f"Failed to create MCP session: {e}"
 
             async def error_stream():
                 yield (
-                    f"data: {json.dumps({'status': 'error', 'error_code': ErrorCode.SESSION_CREATE_FAILED, 'message': f'Failed to create MCP session: {e}'})}\n\n"
+                    f"data: {json.dumps({'status': 'error', 'error_code': ErrorCode.SESSION_CREATE_FAILED, 'message': error_message})}\n\n"
                 )
 
             return StreamingResponse(error_stream(), media_type="text/event-stream")

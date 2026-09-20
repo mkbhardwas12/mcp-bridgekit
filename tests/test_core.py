@@ -1,7 +1,7 @@
 """Tests for MCP BridgeKit — designed to run without Redis."""
 import asyncio
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import patch, AsyncMock
 
 
 @patch("mcp_bridgekit.core.SyncRedis")
@@ -224,16 +224,36 @@ def test_error_code_enum_values():
     assert ErrorCode.UNAUTHORIZED == "UNAUTHORIZED"
 
 
-def test_auth_disabled_by_default():
-    """verify_api_key passes (no exception) when no API key is configured."""
+def test_auth_fails_closed_when_no_key_configured():
+    """verify_api_key raises HTTP 401 when no API key is configured (fail-closed)."""
+    import asyncio as _asyncio
+    from unittest.mock import patch as _patch
+    from fastapi import HTTPException
+
+    async def _check():
+        with _patch("mcp_bridgekit.auth.settings") as mock_settings:
+            mock_settings.api_key = ""
+            mock_settings.allow_no_auth = False
+            from mcp_bridgekit.auth import verify_api_key
+            for header in (None, "anything"):
+                with pytest.raises(HTTPException) as exc_info:
+                    await verify_api_key(x_api_key=header)
+                assert exc_info.value.status_code == 401
+                assert exc_info.value.detail["error_code"] == "AUTH_NOT_CONFIGURED"
+
+    _asyncio.run(_check())
+
+
+def test_auth_can_be_explicitly_disabled():
+    """verify_api_key passes only when allow_no_auth is explicitly set."""
     import asyncio as _asyncio
     from unittest.mock import patch as _patch
 
     async def _check():
         with _patch("mcp_bridgekit.auth.settings") as mock_settings:
-            mock_settings.api_key = ""  # disabled
+            mock_settings.api_key = ""
+            mock_settings.allow_no_auth = True
             from mcp_bridgekit.auth import verify_api_key
-            # Should not raise
             await verify_api_key(x_api_key=None)
             await verify_api_key(x_api_key="anything")
 
@@ -401,7 +421,6 @@ def test_push_notification_webhook_failure_is_logged():
 @patch("mcp_bridgekit.core.Queue")
 def test_sse_events_route_registered(mock_queue, mock_async_redis, mock_sync_redis):
     """GET /mcp/events/{job_id} route exists in the app."""
-    from fastapi.testclient import TestClient
     from mcp_bridgekit.app import app
 
     mock_redis_instance = AsyncMock()
@@ -409,3 +428,150 @@ def test_sse_events_route_registered(mock_queue, mock_async_redis, mock_sync_red
 
     routes = [r.path for r in app.routes]
     assert "/mcp/events/{job_id}" in routes
+
+
+# ── Command allowlist / RCE hardening ─────────────────────────────────────────────
+
+def test_validate_mcp_config_allows_default_command():
+    from mcp_bridgekit.core import validate_mcp_config
+    from mcp_bridgekit.config import settings
+
+    cfg = validate_mcp_config({"command": settings.default_mcp_command, "args": ["x.py"]})
+    assert cfg == {"command": settings.default_mcp_command, "args": ["x.py"]}
+
+
+@pytest.mark.parametrize("bad", [
+    {"command": "/bin/sh", "args": ["-c", "id"]},
+    {"command": "bash"},
+    {"command": None},
+    {"args": ["no-command"]},
+    {"command": "python", "args": "not-a-list"},
+    {"command": "python", "args": [1, 2]},
+])
+def test_validate_mcp_config_rejects_disallowed(bad):
+    from mcp_bridgekit.core import validate_mcp_config, CommandNotAllowedError
+
+    with pytest.raises(CommandNotAllowedError):
+        validate_mcp_config(bad)
+
+
+def test_validate_mcp_config_honours_allowlist_setting():
+    from unittest.mock import patch as _patch
+    from mcp_bridgekit.core import validate_mcp_config
+
+    with _patch("mcp_bridgekit.core.settings") as cfg:
+        cfg.default_mcp_command = "python"
+        cfg.allowed_mcp_commands = ["node"]
+        assert validate_mcp_config({"command": "node", "args": []})["command"] == "node"
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_get_session_rejects_disallowed_command_before_spawn(mock_queue, mock_async_redis, mock_sync_redis):
+    """stdio_client is never reached for a non-allowlisted command."""
+    from mcp_bridgekit.core import BridgeKit, CommandNotAllowedError
+
+    bridge = BridgeKit(redis_url="redis://fake:6379")
+
+    async def _check():
+        with patch("mcp_bridgekit.core.stdio_client") as sc:
+            with pytest.raises(CommandNotAllowedError):
+                await bridge.get_session("attacker", {"command": "/bin/sh", "args": ["-c", "id"]})
+            sc.assert_not_called()
+
+    asyncio.run(_check())
+
+
+def _client_with_auth_disabled(mock_async_redis):
+    from fastapi.testclient import TestClient
+    from mcp_bridgekit.app import app
+
+    inst = AsyncMock()
+    inst.get.return_value = None
+    inst.incr.return_value = 1
+    mock_async_redis.from_url.return_value = inst
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_protected_endpoints_401_without_configured_key(mock_queue, mock_async_redis, mock_sync_redis):
+    with patch("mcp_bridgekit.auth.settings") as auth_cfg:
+        auth_cfg.api_key = ""
+        auth_cfg.allow_no_auth = False
+        with _client_with_auth_disabled(mock_async_redis) as c:
+            assert c.get("/job/x").status_code == 401
+            assert c.get("/tools/u1").status_code == 401
+            assert c.post("/chat", json={"user_id": "u", "messages": []}).status_code == 401
+            assert c.delete("/session/u1").status_code == 401
+            assert c.get("/health").status_code == 200  # public stays public
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_chat_rejects_disallowed_mcp_config(mock_queue, mock_async_redis, mock_sync_redis):
+    with patch("mcp_bridgekit.auth.settings") as auth_cfg, \
+         patch("mcp_bridgekit.core.stdio_client") as sc:
+        auth_cfg.api_key = ""
+        auth_cfg.allow_no_auth = True
+        with _client_with_auth_disabled(mock_async_redis) as c:
+            r = c.post("/chat", json={
+                "user_id": "v", "messages": [],
+                "mcp_config": {"command": "/bin/sh", "args": ["-c", "id"]},
+            })
+        assert r.status_code == 400
+        assert r.json()["error_code"] == "COMMAND_NOT_ALLOWED"
+        sc.assert_not_called()
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_chat_rejects_unknown_mcp_config_fields(mock_queue, mock_async_redis, mock_sync_redis):
+    """Extra StdioServerParameters fields (env, cwd, ...) cannot be smuggled in."""
+    with patch("mcp_bridgekit.auth.settings") as auth_cfg:
+        auth_cfg.api_key = ""
+        auth_cfg.allow_no_auth = True
+        with _client_with_auth_disabled(mock_async_redis) as c:
+            r = c.post("/chat", json={
+                "user_id": "v", "messages": [],
+                "mcp_config": {"command": "python", "env": {"PATH": "/tmp"}},
+            })
+        assert r.status_code == 422
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_tools_endpoint_ignores_command_query_params(mock_queue, mock_async_redis, mock_sync_redis):
+    """/tools no longer lets the caller choose the spawned binary."""
+    from mcp_bridgekit.config import settings
+
+    with patch("mcp_bridgekit.auth.settings") as auth_cfg, \
+         patch("mcp_bridgekit.core.stdio_client", side_effect=RuntimeError("stop")) as sc:
+        auth_cfg.api_key = ""
+        auth_cfg.allow_no_auth = True
+        with _client_with_auth_disabled(mock_async_redis) as c:
+            c.get("/tools/victim", params={"command": "/bin/sh", "args": "-c,id"})
+        params = sc.call_args.args[0]
+        assert params.command == settings.default_mcp_command
+        assert params.args == settings.default_mcp_args
+
+
+@patch("mcp_bridgekit.core.SyncRedis")
+@patch("mcp_bridgekit.core.AsyncRedis")
+@patch("mcp_bridgekit.core.Queue")
+def test_chat_session_failure_returns_error_payload(mock_queue, mock_async_redis, mock_sync_redis):
+    """Regression: error_stream used to NameError on `e`, yielding an empty body."""
+    with patch("mcp_bridgekit.auth.settings") as auth_cfg, \
+         patch("mcp_bridgekit.core.stdio_client", side_effect=RuntimeError("boom")):
+        auth_cfg.api_key = ""
+        auth_cfg.allow_no_auth = True
+        with _client_with_auth_disabled(mock_async_redis) as c:
+            r = c.post("/chat", json={"user_id": "v", "messages": []})
+    assert r.status_code == 200
+    assert "SESSION_CREATE_FAILED" in r.text
+    assert "boom" in r.text

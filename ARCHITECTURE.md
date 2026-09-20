@@ -220,7 +220,7 @@ flowchart LR
     D -->|Correct| C
 ```
 
-- **Disabled by default** (`api_key = ""`): existing clients work without changes.
+- **Fail-closed** (`api_key = ""` → HTTP 401 `AUTH_NOT_CONFIGURED`); set `allow_no_auth = true` to opt out on trusted networks.
 - Enable by setting `MCP_BRIDGEKIT_API_KEY` in environment / `.env`.
 - Public routes (`/health`, `/metrics`, `/events/*`, `/dashboard`, `/`) never call this dependency.
 

@@ -196,17 +196,20 @@ result = await call_mcp_tool(
 
 ## Step 4: Discover Available Tools
 
-Before calling a tool, discover what's available:
+Before calling a tool, discover what's available. `GET /tools/{user_id}` always uses the
+server's `DEFAULT_MCP_COMMAND` / `DEFAULT_MCP_ARGS` — the caller cannot choose the binary:
 
 ```bash
-# Discover tools from the demo MCP server
-curl "http://bridgekit:8000/tools/discovery?command=python&args=examples/mcp_server.py"
+curl -H "X-API-Key: $MCP_BRIDGEKIT_API_KEY" "http://bridgekit:8000/tools/discovery"
+```
 
-# Discover tools from AWS MCP
-curl "http://bridgekit:8000/tools/discovery?command=npx&args=-y,@aws/aws-mcp"
+To expose a different MCP server (e.g. AWS or GitHub via `npx`), configure it on the server side
+and add the command to the allowlist so `/chat` requests may reference it:
 
-# Discover tools from GitHub MCP
-curl "http://bridgekit:8000/tools/discovery?command=npx&args=-y,@modelcontextprotocol/server-github"
+```bash
+export MCP_BRIDGEKIT_DEFAULT_MCP_COMMAND=npx
+export MCP_BRIDGEKIT_DEFAULT_MCP_ARGS='["-y", "@aws/aws-mcp"]'
+export MCP_BRIDGEKIT_ALLOWED_MCP_COMMANDS='["python"]'   # extra commands clients may pass in mcp_config
 ```
 
 Response:

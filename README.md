@@ -4,7 +4,7 @@
 
 Turn any MCP stdio server into HTTP endpoints your web app can call. Per-user session pooling, real timeout handling with background job fallback, live dashboard.
 
-![Version](https://img.shields.io/badge/version-0.9.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-0.10.0-blue) [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11+-blue)
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit&env=MCP_BRIDGEKIT_REDIS_URL&envDescription=Redis%20connection%20URL%20for%20session%20and%20job%20storage&envLink=https%3A%2F%2Fgithub.com%2Fmkbhardwas12%2Fmcp-bridgekit%23configuration&project-name=mcp-bridgekit&repository-name=mcp-bridgekit)
 
@@ -245,7 +245,8 @@ sequenceDiagram
 - **Session management**: Auto-eviction when pool is full, TTL-based expiry, manual `DELETE /session/{user_id}`
 - **Live dashboard**: HTMX + Tailwind — sessions, jobs, logs, tools (no build step)
 - **Structured logging**: via structlog
-- **API key auth** _(v0.8)_: `X-API-Key` header protection — disabled by default, backward-compatible
+- **API key auth** _(v0.8)_: `X-API-Key` header protection — **required by default**; opt out only with `ALLOW_NO_AUTH=true`
+- **MCP command allowlist**: clients can only spawn `DEFAULT_MCP_COMMAND` plus anything in `ALLOWED_MCP_COMMANDS`
 - **Rate limiting** _(v0.8)_: Per-user fixed-window via Redis (default 60 req/min), returns HTTP 429
 - **Retry with backoff** _(v0.8)_: Transient failures retried up to 2× with exponential backoff (1s, 2s)
 - **Prometheus metrics** _(v0.8)_: `GET /metrics` in Prometheus exposition format — scrape with any monitoring stack
@@ -261,7 +262,9 @@ git clone https://github.com/mkbhardwas12/mcp-bridgekit.git
 cd mcp-bridgekit
 
 # Copy environment config
-cp .env.example .env   # edit if needed (all vars have sensible defaults)
+cp .env.example .env
+# REQUIRED: set an API key (protected endpoints return 401 until you do)
+echo "MCP_BRIDGEKIT_API_KEY=$(openssl rand -hex 32)" >> .env
 
 # Install (pick one)
 uv sync --dev          # recommended — fastest
@@ -302,10 +305,11 @@ graph TB
 ```
 
 ```bash
+export MCP_BRIDGEKIT_API_KEY=$(openssl rand -hex 32)   # or put it in .env
 docker-compose up
 ```
 
-This starts Redis, the BridgeKit server (port 8000), and 3 RQ worker replicas.
+This starts Redis, the BridgeKit server (port 8000), and 3 RQ worker replicas. Compose refuses to start without `MCP_BRIDGEKIT_API_KEY`.
 
 ## One-Click Deploy (Vercel)
 
@@ -333,11 +337,13 @@ Call an MCP tool. Returns SSE stream. Auto-queues on timeout.
 }
 ```
 
+`mcp_config` is optional (defaults to `DEFAULT_MCP_COMMAND`/`DEFAULT_MCP_ARGS`). `command` must be in the allowlist — anything else returns HTTP 400 `COMMAND_NOT_ALLOWED`. Only `command` and `args` are accepted.
+
 ### `GET /job/{job_id}`
 Poll background job status. Returns `queued`, `running`, `completed` (with result), or `failed`.
 
-### `GET /tools/{user_id}?command=python&args=examples/mcp_server.py`
-List available tools from the MCP server.
+### `GET /tools/{user_id}`
+List available tools from the server's default MCP server (`DEFAULT_MCP_COMMAND` / `DEFAULT_MCP_ARGS`).
 
 ### `DELETE /session/{user_id}`
 Close a user's MCP session.
@@ -406,6 +412,8 @@ All error payloads include a structured `error_code` field:
 | `TOOL_CALL_FAILED` | Tool raised an exception (after all retries) |
 | `TOOL_TIMED_OUT` | Tool exceeded timeout — job queued |
 | `RATE_LIMITED` | User exceeded requests-per-minute limit |
+| `COMMAND_NOT_ALLOWED` | `mcp_config.command` is not in the allowlist |
+| `AUTH_NOT_CONFIGURED` | No `API_KEY` set and `ALLOW_NO_AUTH` is false |
 | `MISSING_API_KEY` | Auth enabled but header absent |
 | `INVALID_API_KEY` | Wrong API key provided |
 
@@ -447,7 +455,9 @@ Set via environment variables or `.env` file (prefix: `MCP_BRIDGEKIT_`):
 | `JOB_RESULT_TTL_SECONDS` | `600` | How long job results stay in Redis |
 | `DEFAULT_MCP_COMMAND` | `python` | Default MCP server command |
 | `DEFAULT_MCP_ARGS` | `["examples/mcp_server.py"]` | Default MCP server args |
-| `API_KEY` | _(empty)_ | **v0.8** API key for `X-API-Key` header auth. Leave empty to disable. |
+| `ALLOWED_MCP_COMMANDS` | `[]` | Extra commands clients may request via `mcp_config.command`. The default command is always allowed. |
+| `API_KEY` | _(empty)_ | **Required.** API key for `X-API-Key` header auth. Protected endpoints return 401 until set. |
+| `ALLOW_NO_AUTH` | `false` | Explicitly run without an API key. Only for trusted/private networks. |
 | `RATE_LIMIT_PER_MINUTE` | `60` | **v0.8** Max requests per `user_id` per minute. `0` = disabled. |
 | `MAX_TOOL_RETRIES` | `2` | **v0.8** Retry transient tool failures N times with exponential backoff. |
 | `WEBHOOK_URL` | _(empty)_ | **v0.9** URL to POST job completion payload to. Leave empty to disable. |
@@ -455,7 +465,8 @@ Set via environment variables or `.env` file (prefix: `MCP_BRIDGEKIT_`):
 
 ## Security (Auth & Rate Limiting)
 
-Added in v0.8.0. All features are **opt-in** — defaults are backward-compatible.
+Auth is **fail-closed**: with no `API_KEY` configured, protected endpoints return HTTP 401 `AUTH_NOT_CONFIGURED`.
+Set `MCP_BRIDGEKIT_ALLOW_NO_AUTH=true` only on trusted private networks.
 
 ### API Key Authentication
 
@@ -463,8 +474,8 @@ Protects `/chat`, `/tools/`, `/job/`, and `/session/` endpoints.
 `/health`, `/metrics`, and `/dashboard` stay public for monitoring tools.
 
 ```bash
-# Enable by setting a key
-export MCP_BRIDGEKIT_API_KEY=your-secret-key
+# Generate and set a key
+export MCP_BRIDGEKIT_API_KEY=$(openssl rand -hex 32)
 
 # All protected calls need the header
 curl -X POST http://bridgekit:8000/chat \
@@ -474,6 +485,17 @@ curl -X POST http://bridgekit:8000/chat \
 ```
 
 Without the key (or with wrong key): HTTP 401 with `error_code: MISSING_API_KEY` or `INVALID_API_KEY`.
+
+### MCP Command Allowlist
+
+`mcp_config.command` is validated against an allowlist before any subprocess is spawned.
+By default only `DEFAULT_MCP_COMMAND` is allowed; extend it explicitly:
+
+```bash
+export MCP_BRIDGEKIT_ALLOWED_MCP_COMMANDS='["node", "npx"]'
+```
+
+Requests naming any other command get HTTP 400 `COMMAND_NOT_ALLOWED`. `mcp_config` accepts only `command` and `args` — extra fields (`env`, `cwd`, …) are rejected with 422.
 
 ### Rate Limiting
 
@@ -768,6 +790,16 @@ MCP_BRIDGEKIT_REDIS_URL=redis://shared-redis:6379 mcp-bridgekit-worker
 ## 📐 Full Architecture Docs
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams and component docs. When running the server, visit `/architecture` for an interactive HTML version.
+
+## Contributing & Security
+
+Issues and pull requests are welcome. Every fix or hardening that lands is credited in [CHANGELOG.md](CHANGELOG.md).
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+### Acknowledgements
+
+- [@NakedoShadow](https://github.com/NakedoShadow) — timing-safe API key comparison, SSE connection timeout, `.dockerignore` / `.gitignore` hardening ([#1](https://github.com/mkbhardwas12/mcp-bridgekit/pull/1))
+- [@shunfeng8421](https://github.com/shunfeng8421) (blueQ) — reported the unauthenticated RCE via attacker-controlled MCP stdio command that led to fail-closed auth and the command allowlist ([#3](https://github.com/mkbhardwas12/mcp-bridgekit/issues/3))
 
 ## License
 

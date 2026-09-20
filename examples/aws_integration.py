@@ -8,7 +8,13 @@ filesystem MCP, or any MCP server.
 Architecture:
   [Your AWS API]  ──HTTP──▶  [BridgeKit]  ──stdio──▶  [MCP Server]
   (EC2/ECS/Lambda)            (EC2/ECS)               (npx/python/binary)
+
+BridgeKit only spawns allowlisted commands. For the `npx` examples below, the BridgeKit
+server must be started with:  MCP_BRIDGEKIT_ALLOWED_MCP_COMMANDS='["npx"]'
+All protected calls also need the X-API-Key header.
 """
+
+import os
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -25,6 +31,7 @@ app = FastAPI(title="My AWS API")
 #   ECS/EC2:        https://bridgekit.internal.mycompany.com
 #   Vercel:         https://mcp-bridgekit.vercel.app
 BRIDGEKIT_URL = "http://localhost:8000"
+BRIDGEKIT_HEADERS = {"X-API-Key": os.environ.get("MCP_BRIDGEKIT_API_KEY", "")}
 
 
 # ── 1. Simplest integration — call any MCP tool ─────────────
@@ -40,7 +47,7 @@ async def analyze_data(req: ToolRequest):
     Your API endpoint that uses BridgeKit to call an MCP tool.
     The MCP server is configured via mcp_config.
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",
             json={
@@ -76,7 +83,7 @@ async def aws_describe(req: ToolRequest):
       - describe_stack
       etc.
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",
             json={
@@ -104,7 +111,7 @@ async def aws_cdk_generate(req: ToolRequest):
     Prerequisites:
       npm install -g @aws/aws-cdk-mcp-server
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",
             json={
@@ -131,7 +138,7 @@ async def aws_docs_search(req: ToolRequest):
     Prerequisites:
       npm install -g @aws/aws-documentation-mcp-server
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",
             json={
@@ -159,7 +166,7 @@ async def github_search(req: ToolRequest):
       npm install -g @modelcontextprotocol/server-github
       Set GITHUB_TOKEN env var on BridgeKit host
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",
             json={
@@ -196,7 +203,7 @@ async def custom_tool(req: ToolRequest):
         if __name__ == "__main__":
             mcp.run()
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",
             json={
@@ -213,32 +220,22 @@ async def custom_tool(req: ToolRequest):
         return _parse_sse(response.text)
 
 
-# ── 7. Discover available tools from any MCP server ─────────
+# ── 7. Discover available tools from the default MCP server ──
 
-@app.get("/api/tools/{mcp_type}")
-async def discover_tools(mcp_type: str, user_id: str = "discovery-user"):
+@app.get("/api/tools")
+async def discover_tools(user_id: str = "discovery-user"):
     """
-    Discover what tools an MCP server exposes.
+    Discover what tools BridgeKit's default MCP server exposes.
     Call this FIRST to know which tool_name values are valid.
+
+    /tools always uses the server-side DEFAULT_MCP_COMMAND/ARGS — callers
+    cannot choose the binary. To inspect another server, run it via /chat
+    with an allowlisted mcp_config instead.
     """
-    mcp_configs = {
-        "demo": {"command": "python", "args": "examples/mcp_server.py"},
-        "aws": {"command": "npx", "args": "-y,@aws/aws-mcp"},
-        "aws-cdk": {"command": "npx", "args": "-y,@aws/aws-cdk-mcp-server"},
-        "aws-docs": {"command": "npx", "args": "-y,@aws/aws-documentation-mcp-server"},
-        "github": {"command": "npx", "args": "-y,@modelcontextprotocol/server-github"},
-        "filesystem": {"command": "npx", "args": "-y,@modelcontextprotocol/server-filesystem,/tmp"},
-    }
-
-    config = mcp_configs.get(mcp_type)
-    if not config:
-        raise HTTPException(404, f"Unknown MCP type: {mcp_type}. Options: {list(mcp_configs)}")
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{BRIDGEKIT_URL}/tools/{user_id}",
-            params={"command": config["command"], "args": config["args"]},
-        )
+    async with httpx.AsyncClient(timeout=30.0, headers=BRIDGEKIT_HEADERS) as client:
+        resp = await client.get(f"{BRIDGEKIT_URL}/tools/{user_id}")
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, resp.text)
         return resp.json()
 
 
@@ -250,7 +247,7 @@ async def long_running_task(req: ToolRequest):
     For tools that take >25s, BridgeKit auto-queues them.
     This example shows the full flow: call → queued → poll → result.
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, headers=BRIDGEKIT_HEADERS) as client:
         # Step 1: Call the tool — may return immediately or queue it
         response = await client.post(
             f"{BRIDGEKIT_URL}/chat",

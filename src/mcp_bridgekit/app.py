@@ -6,6 +6,7 @@ import structlog
 
 from .auth import verify_api_key
 from .core import BridgeKit
+from .config import settings
 from .events import router as events_router
 from .models import BridgeRequest
 from .dashboard import router as dashboard_router
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MCP BridgeKit",
     description="Embeddable MCP stdio → HTTP bridge with timeout survival",
-    version="0.9.0",
+    version="0.10.0",
     lifespan=lifespan,
 )
 app.include_router(landing_router)
@@ -44,9 +45,9 @@ async def chat(req: BridgeRequest):
 
 
 @app.get("/tools/{user_id}", dependencies=[Depends(verify_api_key)])
-async def list_tools(user_id: str, command: str = "python", args: str = "examples/mcp_server.py"):
-    """List available MCP tools for a given user/server config."""
-    config = {"command": command, "args": args.split(",")}
+async def list_tools(user_id: str):
+    """List available MCP tools for a given user using the server's default MCP config."""
+    config = {"command": settings.default_mcp_command, "args": settings.default_mcp_args}
     tools = await app.state.bridge.list_tools(user_id, config)
     return {"tools": tools}
 

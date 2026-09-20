@@ -15,10 +15,13 @@ class Settings(BaseSettings):
     job_result_ttl_seconds: int = 600  # 10 min — how long job results live in Redis
     default_mcp_command: str = "python"
     default_mcp_args: list[str] = Field(default_factory=lambda: ["examples/mcp_server.py"])
+    # Commands a client may request via mcp_config. Empty → only default_mcp_command.
+    allowed_mcp_commands: list[str] = Field(default_factory=list)
 
     # ── v0.8.0 production features ───────────────────────────
-    # Auth: leave empty to disable (backward-compatible default)
+    # Auth: required. Set api_key, or explicitly opt out with allow_no_auth=true.
     api_key: str = ""
+    allow_no_auth: bool = False
     # Rate limiting: requests per user per minute (0 = disabled)
     rate_limit_per_minute: int = 60
     # Retry: transient tool-call failures will be retried this many times
@@ -31,4 +34,6 @@ class Settings(BaseSettings):
     enable_sse: bool = True
 
 settings = Settings()
-logger.info("MCP BridgeKit config loaded", **settings.model_dump())
+logger.info("MCP BridgeKit config loaded", **settings.model_dump(exclude={"api_key"}))
+if not settings.api_key and settings.allow_no_auth:
+    logger.warning("MCP_BRIDGEKIT_ALLOW_NO_AUTH is set — protected endpoints are open to anyone")

@@ -528,7 +528,7 @@ wheels = [
 
 [[package]]
 name = "mcp-bridgekit"
-version = "0.8.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -539,6 +539,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "redis" },
     { name = "rq" },
+    { name = "sse-starlette" },
     { name = "structlog" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -570,6 +571,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.2.0" },
     { name = "rq", specifier = ">=2.0.0" },
     { name = "ruff", marker = "extra == 'dev'" },
+    { name = "sse-starlette", specifier = ">=2.0.0" },
     { name = "structlog", specifier = ">=24.4.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]

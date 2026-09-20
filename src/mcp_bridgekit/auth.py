@@ -1,8 +1,11 @@
-"""API key authentication — optional.
+"""API key authentication — fail-closed.
 
-Set MCP_BRIDGEKIT_API_KEY to enable. Leave empty (default) to disable.
-When enabled, every protected endpoint requires the header:  X-API-Key: <your-key>
+Set MCP_BRIDGEKIT_API_KEY; every protected endpoint then requires  X-API-Key: <your-key>.
+If no key is configured, protected endpoints return 401 unless
+MCP_BRIDGEKIT_ALLOW_NO_AUTH=true is set explicitly.
 """
+import hmac
+
 from fastapi import Header, HTTPException, status
 import structlog
 
@@ -18,8 +21,17 @@ async def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
     the same request (which would be HTTP 429 territory).
     """
     if not settings.api_key:
-        # Auth disabled — backward-compatible default
-        return
+        if settings.allow_no_auth:
+            return
+        logger.error("api_key_not_configured")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error_code": "AUTH_NOT_CONFIGURED",
+                "message": "Server has no API key configured; protected endpoints are disabled.",
+                "hint": "Set MCP_BRIDGEKIT_API_KEY, or MCP_BRIDGEKIT_ALLOW_NO_AUTH=true for trusted networks only.",
+            },
+        )
 
     if x_api_key is None:
         logger.warning("api_key_missing")
@@ -32,7 +44,7 @@ async def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
             },
         )
 
-    if x_api_key != settings.api_key:
+    if not hmac.compare_digest(x_api_key.encode(), settings.api_key.encode()):
         logger.warning("api_key_invalid")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

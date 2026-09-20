@@ -12,6 +12,7 @@ from rq import Worker
 import structlog
 
 from .config import settings
+from .core import validate_mcp_config
 
 logger = structlog.get_logger()
 
@@ -49,7 +50,7 @@ def process_job(payload: dict, job_id: str):
 
 async def _run_mcp_call(payload: dict) -> dict:
     """Spin up a fresh MCP session and call the tool."""
-    mcp_config = payload["mcp_config"]
+    mcp_config = validate_mcp_config(payload["mcp_config"])
     tool_name = payload["tool_name"]
     tool_args = payload.get("tool_args", {})
 

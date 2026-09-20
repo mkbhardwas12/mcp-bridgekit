@@ -17,6 +17,8 @@ services:
     environment:
       - MCP_BRIDGEKIT_REDIS_URL=redis://redis:6379
       - MCP_BRIDGEKIT_MAX_SESSIONS=200
+      # Fails `docker compose up` unless set in .env or the shell
+      - MCP_BRIDGEKIT_API_KEY=${MCP_BRIDGEKIT_API_KEY:?Set MCP_BRIDGEKIT_API_KEY (e.g. openssl rand -hex 32)}
     deploy:
       resources:
         limits:
