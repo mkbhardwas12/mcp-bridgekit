@@ -20,6 +20,15 @@ Contributors are credited on the change they made or reported.
 ### Changed
 - Version string is read from `mcp_bridgekit.__version__` everywhere (FastAPI docs, landing page).
 - README: new hero, status badges, 60-second demo.
+- Dependencies refreshed (FastAPI 0.141, redis 8, rq 2.12, structlog 26, sse-starlette 3.4, …).
+- `mcp` pinned to `>=1.0,<2`: mcp 2.x renames `FastMCP` → `MCPServer` and changes the client
+  API, which breaks `examples/mcp_server.py` and session start-up ("Connection closed").
+  Migration to 2.x is tracked as a separate change.
+- `ruff` rule set is now explicit in `pyproject.toml` so lint results don't drift with ruff releases.
+
+### Fixed
+- Test suite compatible with FastAPI ≥ 0.135 (included routers no longer expose `.path` on
+  `app.routes`; the SSE route test now checks the OpenAPI schema).
 
 ## [0.10.0] — 2026-09-20
 

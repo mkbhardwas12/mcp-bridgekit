@@ -281,7 +281,7 @@ class BridgeKit:
                     yield f"data: {json.dumps(result.model_dump(), default=str)}\n\n"
                     return  # Success — exit the retry loop
 
-                except (asyncio.TimeoutError, TimeoutError):
+                except TimeoutError:
                     # Timeout is not retried — queue immediately as a background job
                     job_id = str(uuid.uuid4())
                     job_payload = {

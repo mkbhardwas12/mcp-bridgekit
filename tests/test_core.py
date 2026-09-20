@@ -426,8 +426,9 @@ def test_sse_events_route_registered(mock_queue, mock_async_redis, mock_sync_red
     mock_redis_instance = AsyncMock()
     mock_async_redis.from_url.return_value = mock_redis_instance
 
-    routes = [r.path for r in app.routes]
-    assert "/mcp/events/{job_id}" in routes
+    # Use the OpenAPI schema rather than app.routes: newer FastAPI versions
+    # represent included routers as objects without a .path attribute.
+    assert "/mcp/events/{job_id}" in app.openapi()["paths"]
 
 
 # ── Command allowlist / RCE hardening ─────────────────────────────────────────────

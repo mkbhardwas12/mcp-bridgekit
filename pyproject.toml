@@ -24,7 +24,8 @@ classifiers = [
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
-    "mcp>=1.0.0",
+    # mcp 2.x renamed FastMCP -> MCPServer and changed the client API; tracked separately
+    "mcp>=1.0.0,<2",
     "redis>=5.2.0",
     "rq>=2.0.0",
     "pydantic-settings>=2.7.0",
@@ -57,3 +58,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# Explicit so lint results don't change when ruff's defaults move
+select = ["E4", "E7", "E9", "F", "UP041"]
