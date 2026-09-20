@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync --dev
       - run: uv run ruff check src tests examples
 
@@ -36,7 +36,7 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --dev
@@ -54,7 +54,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
